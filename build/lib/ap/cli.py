@@ -17,8 +17,8 @@ import yaml
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# 加载环境变量 - 从当前工作目录查找 .env 文件
-load_dotenv(dotenv_path=Path.cwd() / '.env')
+# 加载环境变量
+load_dotenv()
 
 # 创建 Typer 应用
 app = typer.Typer(help="AP CLI - 命令行学习工具")

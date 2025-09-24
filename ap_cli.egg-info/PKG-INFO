@@ -4,7 +4,7 @@ Version: 1.0.0
 Summary: 一个帮助用户通过提问-生成-测验循环来学习新概念的命令行工具
 Home-page: 
 Author: AP CLI Team
-Author-email: 
+Author-email: yangjh@xbmu.edu.cn
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Education
 Classifier: License :: OSI Approved :: MIT License
@@ -22,6 +22,7 @@ Requires-Dist: openai>=1.109.0
 Requires-Dist: python-dotenv==1.0.0
 Requires-Dist: PyYAML==6.0.1
 Dynamic: author
+Dynamic: author-email
 Dynamic: classifier
 Dynamic: description
 Dynamic: description-content-type
