@@ -26,6 +26,58 @@ app = typer.Typer(help="AP CLI - 命令行学习工具")
 # 工作区目录
 WORKSPACE_DIR = Path("workspace")
 
+class ConceptMap:
+    """概念地图管理类"""
+    
+    def __init__(self, file_path: str = None):
+        if file_path is None:
+            file_path = WORKSPACE_DIR / "concept_map.json"
+        self.file_path = Path(file_path)
+        self.data = self.load()
+    
+    def load(self) -> dict:
+        """加载现有概念地图"""
+        if self.file_path.exists():
+            try:
+                with open(self.file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                typer.echo(f"警告：无法读取概念地图文件 {self.file_path}: {e}", err=True)
+                return {}
+        return {}
+    
+    def save(self) -> None:
+        """保存概念地图到文件"""
+        # 确保目录存在
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with open(self.file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            typer.echo(f"错误：无法保存概念地图文件 {self.file_path}: {e}", err=True)
+            raise typer.Exit(1)
+    
+    def add_concept(self, concept_id: str, concept_data: dict) -> None:
+        """添加新概念到地图"""
+        self.data[concept_id] = concept_data
+    
+    def update_status(self, concept_id: str, status_key: str, value) -> None:
+        """更新概念状态"""
+        if concept_id in self.data:
+            if 'status' not in self.data[concept_id]:
+                self.data[concept_id]['status'] = {}
+            self.data[concept_id]['status'][status_key] = value
+    
+    def update_mastery(self, concept_id: str, score_percent: float) -> None:
+        """更新概念掌握程度"""
+        if concept_id in self.data:
+            if 'mastery' not in self.data[concept_id]:
+                self.data[concept_id]['mastery'] = {}
+            current_best = self.data[concept_id]['mastery'].get('best_score_percent', -1)
+            if score_percent > current_best:
+                self.data[concept_id]['mastery']['best_score_percent'] = score_percent
+
 def slugify(text: str) -> str:
     """
     将概念名称转换为文件系统友好的格式
@@ -481,6 +533,144 @@ def study(concept: str):
         typer.echo()
         typer.echo("=" * 50)
         typer.echo(f"学习流程失败：{str(e)}", err=True)
+        raise typer.Exit(1)
+
+def create_map_prompt(topic: str) -> str:
+    """
+    创建用于生成学习地图的提示词
+    """
+    return f"""请将以下主题拆解为结构化的学习路径。返回一个JSON格式的概念地图，包含主概念和所有子概念。
+
+要求：
+1. 主概念应该包含核心子概念
+2. 每个子概念应该是独立可学习的知识点
+3. 如有必要，请创立孙概念
+4. 概念名称要具体明确，避免过于宽泛
+5. 按学习的逻辑顺序排列子概念
+6. 严格按照以下JSON格式返回，不要包含任何额外的解释文字
+
+主题: {topic}
+
+返回格式示例：
+{{
+  "main_concept": "Python Core Syntax",
+  "children": [
+    "Variables and Data Types",
+    "Control Flow",
+    "Functions and Scope",
+    "Data Structures"
+  ]
+}}"""
+
+@app.command("m")
+@app.command("map")
+def generate_map(topic: str):
+    """
+    生成学习地图 - 将宏观主题拆解为结构化学习路径
+    
+    Args:
+        topic: 要学习的主题名称，例如 "Python Core Syntax"
+    """
+    if not topic.strip():
+        typer.echo("错误：请提供要学习的主题名称", err=True)
+        raise typer.Exit(1)
+    
+    typer.echo(f"🗺️  正在为主题 '{topic}' 生成学习地图...")
+    
+    try:
+        # 获取 DeepSeek 客户端
+        client = get_deepseek_client()
+        
+        # 创建提示词
+        prompt = create_map_prompt(topic)
+        
+        # 调用 API
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=2000
+        )
+        
+        # 解析响应
+        content = response.choices[0].message.content.strip()
+        
+        # 尝试解析JSON
+        try:
+            map_data = json.loads(content)
+        except json.JSONDecodeError:
+            # 如果直接解析失败，尝试提取JSON部分
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                map_data = json.loads(json_match.group())
+            else:
+                typer.echo("错误：AI返回的内容不是有效的JSON格式", err=True)
+                typer.echo(f"AI返回内容：{content}", err=True)
+                raise typer.Exit(1)
+        
+        # 验证数据结构
+        if 'main_concept' not in map_data or 'children' not in map_data:
+            typer.echo("错误：AI返回的数据结构不完整", err=True)
+            raise typer.Exit(1)
+        
+        # 创建概念地图管理器
+        concept_map = ConceptMap()
+        
+        # 处理主概念
+        main_concept_name = map_data['main_concept']
+        main_concept_id = slugify(main_concept_name)
+        children_ids = [slugify(child) for child in map_data['children']]
+        
+        # 添加主概念
+        concept_map.add_concept(main_concept_id, {
+            "name": main_concept_name,
+            "children": children_ids,
+            "status": {
+                "explained": False,
+                "quiz_generated": False
+            },
+            "mastery": {
+                "best_score_percent": -1
+            }
+        })
+        
+        # 添加子概念
+        for child_name in map_data['children']:
+            child_id = slugify(child_name)
+            concept_map.add_concept(child_id, {
+                "name": child_name,
+                "children": [],
+                "status": {
+                    "explained": False,
+                    "quiz_generated": False
+                },
+                "mastery": {
+                    "best_score_percent": -1
+                }
+            })
+        
+        # 保存概念地图
+        concept_map.save()
+        
+        # 显示成功信息
+        typer.echo("🗺️  学习地图生成成功！")
+        typer.echo("")
+        typer.echo(f"主题: {main_concept_name}")
+        typer.echo(f"└── 包含 {len(map_data['children'])} 个子概念:")
+        
+        for i, child in enumerate(map_data['children']):
+            prefix = "├──" if i < len(map_data['children']) - 1 else "└──"
+            typer.echo(f"    {prefix} {child}")
+        
+        typer.echo("")
+        typer.echo(f"💾 概念地图已保存到: {concept_map.file_path}")
+        typer.echo("💡 使用 'ap t' 查看完整学习仪表盘")
+        
+    except Exception as e:
+        typer.echo(f"错误：生成学习地图时发生异常: {e}", err=True)
         raise typer.Exit(1)
 
 def main():
