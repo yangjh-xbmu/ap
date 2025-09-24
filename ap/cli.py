@@ -130,11 +130,71 @@ def explain(concept: str):
         typer.echo(f"生成解释文档时发生错误: {str(e)}", err=True)
         raise typer.Exit(1)
 
-def create_quiz_prompt(concept: str, explanation_content: str) -> str:
+def analyze_document_structure(content: str) -> dict:
+    """
+    分析文档结构，计算建议的题目数量
+    
+    Args:
+        content: Markdown文档内容
+        
+    Returns:
+        dict: 包含分析结果的字典
+    """
+    lines = content.split('\n')
+    
+    # 统计主要章节（## 标题）
+    main_sections = []
+    has_code_example = False
+    has_analogy = False
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith('## '):
+            section_title = line[3:].strip()
+            main_sections.append(section_title)
+        elif '```' in line:
+            has_code_example = True
+        elif any(keyword in line.lower() for keyword in ['类比', 'analogy', '比如', '就像']):
+            has_analogy = True
+    
+    # 计算基础题目数：主要章节数 × 1.5，向上取整
+    base_questions = max(3, min(12, int(len(main_sections) * 1.5) + (len(main_sections) % 2)))
+    
+    # 调整规则
+    if has_code_example:
+        base_questions += 1
+    if has_analogy:
+        base_questions += 1
+    
+    # 确保在合理范围内
+    recommended_questions = max(3, min(12, base_questions))
+    
+    return {
+        'main_sections': main_sections,
+        'section_count': len(main_sections),
+        'has_code_example': has_code_example,
+        'has_analogy': has_analogy,
+        'recommended_questions': recommended_questions
+    }
+
+def create_quiz_prompt(concept: str, explanation_content: str, num_questions: int = None) -> str:
     """
     构建生成测验的 Prompt
+    
+    Args:
+        concept: 概念名称
+        explanation_content: 解释文档内容
+        num_questions: 题目数量，如果为None则使用智能分析
     """
-    return f"""基于以下关于 "{concept}" 的解释文档，生成 5 道选择题。
+    # 如果未指定题目数量，进行智能分析
+    if num_questions is None:
+        analysis = analyze_document_structure(explanation_content)
+        num_questions = analysis['recommended_questions']
+        sections_info = f"\n文档包含 {analysis['section_count']} 个主要知识点：{', '.join(analysis['main_sections'])}"
+    else:
+        sections_info = ""
+    
+    return f"""基于以下关于 "{concept}" 的解释文档，生成 {num_questions} 道选择题。{sections_info}
 
 解释文档内容：
 {explanation_content}
@@ -161,15 +221,22 @@ def create_quiz_prompt(concept: str, explanation_content: str) -> str:
 2. 问题应该测试对概念的理解，而不是记忆细节
 3. 答案必须是选项中的完整文本
 4. 题目难度适中，既不过于简单也不过于困难
-5. 涵盖概念的不同方面"""
+5. 涵盖概念的不同方面，确保每个主要知识点都有对应的题目
+6. 题目应该平衡分布在各个知识点上，避免某个方面过度集中"""
 
 @app.command("g")
-def generate_quiz(concept: str):
+def generate_quiz(
+    concept: str,
+    num_questions: Optional[int] = typer.Option(None, "--num-questions", "-n", help="指定题目数量 (3-12)，默认为智能计算"),
+    mode: str = typer.Option("auto", "--mode", help="生成模式：auto(智能) 或 fixed(固定)")
+):
     """
     基于解释文档生成测验题目
     
     Args:
         concept: 要生成测验的概念名称
+        num_questions: 题目数量 (可选，3-12范围)
+        mode: 生成模式 (auto/fixed)
     """
     try:
         # 规范化概念名称
@@ -188,6 +255,20 @@ def generate_quiz(concept: str):
         with open(explanation_file, 'r', encoding='utf-8') as f:
             explanation_content = f.read()
         
+        # 处理题目数量
+        if num_questions is not None:
+            # 验证题目数量范围
+            if num_questions < 3 or num_questions > 12:
+                typer.secho(f"警告: 题目数量 {num_questions} 超出建议范围 (3-12)，已自动调整为 {max(3, min(12, num_questions))}。", fg=typer.colors.YELLOW)
+                num_questions = max(3, min(12, num_questions))
+        
+        # 智能模式：分析文档结构
+        if mode == "auto" and num_questions is None:
+            analysis = analyze_document_structure(explanation_content)
+            recommended = analysis['recommended_questions']
+            typer.echo(f"📊 文档分析: 发现 {analysis['section_count']} 个主要知识点，建议生成 {recommended} 道题目")
+            num_questions = recommended
+        
         # 确保 workspace/quizzes 目录存在
         quizzes_dir = WORKSPACE_DIR / "quizzes"
         quizzes_dir.mkdir(parents=True, exist_ok=True)
@@ -199,15 +280,15 @@ def generate_quiz(concept: str):
         client = get_deepseek_client()
         
         # 生成测验内容
-        typer.echo(f"🤔 正在为 \"{concept}\" 生成测验题目...")
+        typer.echo(f"🤔 正在为 \"{concept}\" 生成 {num_questions} 道测验题目...")
         
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "user", "content": create_quiz_prompt(concept, explanation_content)}
+                {"role": "user", "content": create_quiz_prompt(concept, explanation_content, num_questions)}
             ],
-            temperature=0.7,
-            max_tokens=2000
+            temperature=0.5,
+            max_tokens=2000  # 增加token限制以支持更多题目
         )
         
         quiz_content = response.choices[0].message.content.strip()
@@ -378,7 +459,7 @@ def study(concept: str):
         
         # 步骤2: 生成测验题目
         typer.echo("步骤 2/3: 生成测验题目...")
-        generate_quiz(concept)
+        generate_quiz(concept, num_questions=None, mode="auto")
         typer.echo("步骤 2/3: 完成")
         typer.echo()
         

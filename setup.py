@@ -13,7 +13,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="ap-cli",
-    version="1.2.0",
+    version="1.3.0",
     author="AP CLI Team",
     author_email="yangjh@xbmu.edu.cn",
     description="一个帮助用户通过提问-生成-测验循环来学习新概念的命令行工具",
