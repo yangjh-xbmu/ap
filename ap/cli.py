@@ -91,6 +91,60 @@ def slugify(text: str) -> str:
     # 去除首尾连字符
     return text.strip('-')
 
+def get_concept_topic(concept: str) -> str:
+    """
+    根据概念名称获取其所属的主题
+    
+    Args:
+        concept: 概念名称，可能包含主题前缀（如 "主题/概念"）
+        
+    Returns:
+        主题名称，如果找不到则返回默认主题
+    """
+    try:
+        concept_map = ConceptMap()
+        
+        # 检查是否包含主题前缀（格式：主题/概念）
+        if '/' in concept:
+            topic_part, concept_part = concept.split('/', 1)
+            # 检查这个主题是否存在
+            if 'topics' in concept_map.data:
+                for topic_id, topic_data in concept_map.data['topics'].items():
+                    topic_name = topic_data.get('name', topic_id)
+                    if (topic_part == topic_name or 
+                        slugify(topic_part) == slugify(topic_name) or
+                        topic_part == topic_id):
+                        # 验证概念是否存在于该主题中
+                        if isinstance(topic_data, dict) and 'concepts' in topic_data:
+                            concept_slug = slugify(concept_part)
+                            for concept_id, concept_data in topic_data['concepts'].items():
+                                if (concept_slug == concept_id or 
+                                    concept_slug == slugify(concept_data.get('name', '')) or
+                                    concept_part == concept_data.get('name', '')):
+                                    return topic_name
+                        # 即使概念不存在，也返回指定的主题
+                        return topic_name
+        
+        # 如果没有主题前缀，按原逻辑查找
+        concept_slug = slugify(concept)
+        
+        # 检查是否有topics结构
+        if 'topics' in concept_map.data:
+            # 遍历所有主题，查找包含该概念的主题
+            for topic_id, topic_data in concept_map.data['topics'].items():
+                if isinstance(topic_data, dict) and 'concepts' in topic_data:
+                    # 检查概念名称的各种匹配方式
+                    for concept_id, concept_data in topic_data['concepts'].items():
+                        if (concept_slug == concept_id or 
+                            concept_slug == slugify(concept_data.get('name', '')) or
+                            concept == concept_data.get('name', '')):
+                            return topic_data.get('name', topic_id)
+        
+        # 如果找不到，返回默认主题
+        return "default"
+    except Exception:
+        return "default"
+
 def get_deepseek_client() -> OpenAI:
     """
     获取 DeepSeek API 客户端
@@ -145,14 +199,17 @@ def explain(concept: str):
         concept: 要解释的概念名称
     """
     try:
+        # 获取概念所属的主题
+        topic = get_concept_topic(concept)
+        topic_slug = slugify(topic)
+        
         # 规范化概念名称
         concept_slug = slugify(concept)
         
-        # 确保 workspace/explanation 目录存在
-        explanation_dir = WORKSPACE_DIR / "explanation"
+        # 构造输出文件路径 - 按主题组织
+        explanation_dir = WORKSPACE_DIR / topic_slug / "explanation"
         explanation_dir.mkdir(parents=True, exist_ok=True)
         
-        # 构造输出文件路径
         explanation_file = explanation_dir / f"{concept_slug}.md"
         
         # 获取 DeepSeek 客户端
@@ -291,11 +348,23 @@ def generate_quiz(
         mode: 生成模式 (auto/fixed)
     """
     try:
-        # 规范化概念名称
-        concept_slug = slugify(concept)
+        # 解析概念名称，提取主题和概念部分
+        if '/' in concept:
+            topic_part, concept_part = concept.split('/', 1)
+            # 获取主题
+            topic = get_concept_topic(concept)
+            # 使用概念部分作为文件名
+            concept_slug = slugify(concept_part)
+        else:
+            # 获取概念所属的主题
+            topic = get_concept_topic(concept)
+            # 规范化概念名称
+            concept_slug = slugify(concept)
         
-        # 构造解释文档路径
-        explanation_file = WORKSPACE_DIR / "explanation" / f"{concept_slug}.md"
+        topic_slug = slugify(topic)
+        
+        # 构造解释文档路径 - 按主题组织
+        explanation_file = WORKSPACE_DIR / topic_slug / "explanation" / f"{concept_slug}.md"
         
         # 检查解释文档是否存在
         if not explanation_file.exists():
@@ -321,8 +390,8 @@ def generate_quiz(
             typer.echo(f"📊 文档分析: 发现 {analysis['section_count']} 个主要知识点，建议生成 {recommended} 道题目")
             num_questions = recommended
         
-        # 确保 workspace/quizzes 目录存在
-        quizzes_dir = WORKSPACE_DIR / "quizzes"
+        # 确保按主题组织的 quizzes 目录存在
+        quizzes_dir = WORKSPACE_DIR / topic_slug / "quizzes"
         quizzes_dir.mkdir(parents=True, exist_ok=True)
         
         # 构造输出文件路径
@@ -366,11 +435,23 @@ def quiz(concept: str):
         concept: 要进行测验的概念名称
     """
     try:
-        # 规范化概念名称
-        concept_slug = slugify(concept)
+        # 解析概念名称，提取主题和概念部分
+        if '/' in concept:
+            topic_part, concept_part = concept.split('/', 1)
+            # 获取主题
+            topic = get_concept_topic(concept)
+            # 使用概念部分作为文件名
+            concept_slug = slugify(concept_part)
+        else:
+            # 获取概念所属的主题
+            topic = get_concept_topic(concept)
+            # 规范化概念名称
+            concept_slug = slugify(concept)
         
-        # 构造输入文件路径
-        quiz_file = WORKSPACE_DIR / "quizzes" / f"{concept_slug}.yml"
+        topic_slug = slugify(topic)
+        
+        # 构造输入文件路径 - 按主题组织
+        quiz_file = WORKSPACE_DIR / topic_slug / "quizzes" / f"{concept_slug}.yml"
         
         # 检查文件是否存在
         if not quiz_file.exists():
@@ -460,8 +541,8 @@ def quiz(concept: str):
         typer.echo("\n" + "=" * 50)
         typer.echo(f"测验完成！你答对了 {correct_count}/{total_questions} 题，正确率 {accuracy:.1f}%")
         
-        # 保存结果到 JSON 文件
-        results_dir = WORKSPACE_DIR / "results"
+        # 保存结果到 JSON 文件 - 按主题组织
+        results_dir = WORKSPACE_DIR / topic_slug / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
         
         # 生成时间戳
@@ -472,6 +553,7 @@ def quiz(concept: str):
         quiz_result = {
             "concept": concept,
             "concept_slug": concept_slug,
+            "topic": topic,
             "quiz_time": datetime.now().isoformat(),
             "total_questions": total_questions,
             "correct_count": correct_count,
@@ -484,6 +566,33 @@ def quiz(concept: str):
             json.dump(quiz_result, f, ensure_ascii=False, indent=2)
         
         typer.echo(f"测验结果已保存到: {result_file}")
+        
+        # 更新概念地图中的学习进度
+        concept_map = ConceptMap()
+        
+        # 构建概念ID - 使用主题和概念的组合
+        concept_id = f"{topic_slug}/{concept_slug}"
+        
+        # 确保概念存在于地图中
+        if concept_id not in concept_map.data:
+            concept_map.add_concept(concept_id, {
+                "name": concept,
+                "topic": topic,
+                "status": {},
+                "mastery": {}
+            })
+        
+        # 更新测验状态
+        concept_map.update_status(concept_id, "quiz_completed", True)
+        concept_map.update_status(concept_id, "last_quiz_time", datetime.now().isoformat())
+        
+        # 更新掌握程度
+        concept_map.update_mastery(concept_id, accuracy)
+        
+        # 保存概念地图
+        concept_map.save()
+        
+        typer.echo(f"学习进度已更新：{concept} - 掌握程度 {accuracy:.1f}%")
         
     except typer.Exit as e:
         raise e
@@ -617,30 +726,21 @@ def generate_map(topic: str):
             raise typer.Exit(1)
         
         # 创建概念地图管理器
+        from ap.core.concept_map import ConceptMap, slugify as concept_slugify
         concept_map = ConceptMap()
         
         # 处理主概念
         main_concept_name = map_data['main_concept']
-        main_concept_id = slugify(main_concept_name)
-        children_ids = [slugify(child) for child in map_data['children']]
+        main_concept_id = concept_slugify(main_concept_name)
+        children_names = map_data['children']
         
-        # 添加主概念
-        concept_map.add_concept(main_concept_id, {
-            "name": main_concept_name,
-            "children": children_ids,
-            "status": {
-                "explained": False,
-                "quiz_generated": False
-            },
-            "mastery": {
-                "best_score_percent": -1
-            }
-        })
+        # 添加主题到概念地图
+        concept_map.add_topic(main_concept_id, main_concept_name)
         
-        # 添加子概念
-        for child_name in map_data['children']:
-            child_id = slugify(child_name)
-            concept_map.add_concept(child_id, {
+        # 添加子概念到主题中
+        for child_name in children_names:
+            child_id = concept_slugify(child_name)
+            concept_data = {
                 "name": child_name,
                 "children": [],
                 "status": {
@@ -650,7 +750,8 @@ def generate_map(topic: str):
                 "mastery": {
                     "best_score_percent": -1
                 }
-            })
+            }
+            concept_map.add_concept(main_concept_id, child_id, concept_data)
         
         # 保存概念地图
         concept_map.save()
@@ -659,10 +760,10 @@ def generate_map(topic: str):
         typer.echo("🗺️  学习地图生成成功！")
         typer.echo("")
         typer.echo(f"主题: {main_concept_name}")
-        typer.echo(f"└── 包含 {len(map_data['children'])} 个子概念:")
+        typer.echo(f"└── 包含 {len(children_names)} 个子概念:")
         
-        for i, child in enumerate(map_data['children']):
-            prefix = "├──" if i < len(map_data['children']) - 1 else "└──"
+        for i, child in enumerate(children_names):
+            prefix = "├──" if i < len(children_names) - 1 else "└──"
             typer.echo(f"    {prefix} {child}")
         
         typer.echo("")
@@ -673,9 +774,271 @@ def generate_map(topic: str):
         typer.echo(f"错误：生成学习地图时发生异常: {e}", err=True)
         raise typer.Exit(1)
 
+@app.command("t")
+@app.command("tree")
+@app.command("status")
+def display_tree(topic: Optional[str] = typer.Argument(None, help="主题名称（可选）")):
+    """显示学习进度树状图"""
+    try:
+        # 导入多主题ConceptMap
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).parent.parent))
+        from ap.core.concept_map import ConceptMap as MultiTopicConceptMap
+        
+        concept_map = MultiTopicConceptMap()
+        
+        if topic is None:
+            # 显示全局概览
+            display_global_overview(concept_map)
+        else:
+            # 显示单主题详情
+            topic_id = slugify(topic)
+            
+            # 检查主题是否存在
+            if not concept_map.topic_exists(topic_id):
+                typer.echo(f"❌ 主题 '{topic}' 不存在")
+                suggest_available_topics(concept_map)
+                raise typer.Exit(1)
+            
+            display_topic_details(concept_map, topic_id)
+            
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ 显示失败: {str(e)}")
+        raise typer.Exit(1)
+
+
+def display_global_overview(concept_map):
+    """显示全局概览"""
+    typer.echo("📊 学习进度概览")
+    typer.echo("=" * 50)
+    
+    topics = concept_map.list_topics()
+    if not topics:
+        typer.echo("暂无学习主题，请使用 'ap m <主题名称>' 创建学习地图")
+        return
+    
+    for topic_id in topics:
+        try:
+            topic_data = concept_map.get_topic(topic_id)
+            if topic_data:
+                # 对于新格式的多主题数据，直接使用topic_data中的concepts
+                # 对于迁移的数据，需要从全局数据中获取概念信息
+                concepts = topic_data.get('concepts', {})
+                
+                # 如果concepts为空但有children，说明是旧格式数据，需要从全局获取
+                if not concepts and 'children' in topic_data:
+                    # 从全局数据中获取子概念的详细信息
+                    all_data = concept_map.data
+                    concepts = {}
+                    for child_id in topic_data.get('children', []):
+                        # 在topics之外查找概念数据（旧格式迁移后的结构）
+                        for key, value in all_data.items():
+                            if key != 'topics' and key != 'metadata' and isinstance(value, dict):
+                                if key == child_id:
+                                    concepts[child_id] = value
+                
+                stats = calculate_topic_stats_direct(concepts)
+                progress_bar = create_progress_bar(stats['progress_percent'])
+                
+                typer.echo(f"\n🎯 {topic_data.get('name', topic_id)}")
+                typer.echo(f"   进度: {progress_bar} {stats['progress_percent']:.1f}%")
+                typer.echo(f"   概念: {stats['completed_count']}/{stats['total_count']} 已完成")
+                typer.echo(f"   掌握度: {stats['avg_mastery']:.1f}%")
+        except Exception as e:
+            typer.echo(f"❌ 获取主题 '{topic_id}' 信息失败: {str(e)}")
+    
+    typer.echo(f"\n💡 使用 'ap t <主题ID>' 查看特定主题的详细信息")
+
+
+def calculate_topic_stats_direct(concepts: dict) -> dict:
+    """直接计算概念统计信息，不依赖topic_data结构"""
+    total_count = count_all_concepts(concepts)
+    completed_count = count_completed_concepts(concepts)
+    total_mastery = sum_all_mastery(concepts)
+    
+    progress_percent = (completed_count / total_count * 100) if total_count > 0 else 0
+    avg_mastery = (total_mastery / total_count) if total_count > 0 else 0
+    
+    return {
+        'total_count': total_count,
+        'completed_count': completed_count,
+        'progress_percent': progress_percent,
+        'avg_mastery': avg_mastery
+    }
+
+
+def display_topic_details(concept_map, topic_id):
+    """显示单主题详情"""
+    topic_data = concept_map.get_topic(topic_id)
+    if not topic_data:
+        typer.echo(f"❌ 主题 '{topic_id}' 不存在")
+        return
+    
+    # 主题信息
+    typer.echo(f"🎯 {topic_data.get('name', topic_id)}")
+    typer.echo(f"创建时间: {topic_data.get('created_at', 'Unknown')}")
+    
+    # 学习统计
+    stats = calculate_topic_stats(topic_data)
+    progress_bar = create_progress_bar(stats['progress_percent'])
+    
+    typer.echo(f"\n📊 学习统计")
+    typer.echo(f"总体进度: {progress_bar} {stats['progress_percent']:.1f}%")
+    typer.echo(f"概念总数: {stats['total_count']}")
+    typer.echo(f"已完成: {stats['completed_count']}")
+    typer.echo(f"平均掌握度: {stats['avg_mastery']:.1f}%")
+    
+    # 概念结构
+    typer.echo(f"\n🌳 概念结构")
+    concepts = topic_data.get('concepts', {})
+    if concepts:
+        display_concept_tree(concepts)
+    else:
+        typer.echo("暂无概念数据")
+
+
+def suggest_available_topics(concept_map):
+    """建议可用主题"""
+    topics = concept_map.list_topics()
+    if topics:
+        topic_list = ', '.join(topics)
+        typer.echo(f"可用主题: {topic_list}")
+    else:
+        typer.echo("暂无可用主题，请使用 'ap m <主题名称>' 创建学习地图")
+
+
+def get_status_icon(status: dict, mastery: dict) -> str:
+    """根据学习状态和掌握程度返回对应的状态图标"""
+    if not status.get('explained', False):
+        return "⚪"  # 未开始
+    elif status.get('quiz_taken', False):
+        score = mastery.get('best_score_percent', -1)
+        if score >= 80:
+            return "🟢"  # 已掌握
+        elif score >= 60:
+            return "🟡"  # 学习中
+        else:
+            return "🔴"  # 需复习
+    elif status.get('quiz_generated', False):
+        return "🟡"  # 学习中
+    else:
+        return "🟡"  # 学习中
+
+
+def create_progress_bar(percentage: float, width: int = 20) -> str:
+    """创建进度条"""
+    filled = int(width * percentage / 100)
+    bar = "█" * filled + "░" * (width - filled)
+    return f"[{bar}]"
+
+
+def count_all_concepts(concepts: dict) -> int:
+    """递归计算所有概念数量"""
+    count = 0
+    for concept_data in concepts.values():
+        count += 1
+        if concept_data.get('children'):
+            count += count_all_concepts(concept_data['children'])
+    return count
+
+
+def count_completed_concepts(concepts: dict) -> int:
+    """递归计算已完成概念数量"""
+    count = 0
+    for concept_data in concepts.values():
+        status = concept_data.get('status', {})
+        if status.get('quiz_taken', False):
+            count += 1
+        if concept_data.get('children'):
+            count += count_completed_concepts(concept_data['children'])
+    return count
+
+
+def sum_all_mastery(concepts: dict) -> float:
+    """递归计算所有概念的掌握度总和"""
+    total = 0.0
+    for concept_data in concepts.values():
+        mastery = concept_data.get('mastery', {})
+        score = mastery.get('best_score_percent', 0)
+        if score > 0:
+            total += score
+        if concept_data.get('children'):
+            total += sum_all_mastery(concept_data['children'])
+    return total
+
+
+def calculate_topic_stats(topic_data: dict) -> dict:
+    """计算主题统计信息"""
+    # 获取概念数据，支持新旧格式
+    concepts = topic_data.get('concepts', {})
+    
+    # 如果concepts是空的，尝试从children构建概念字典
+    if not concepts and 'children' in topic_data:
+        # 从当前概念地图中获取所有概念
+        from ap.core.concept_map import ConceptMap as MultiTopicConceptMap
+        concept_map = MultiTopicConceptMap()
+        all_data = concept_map.data
+        
+        # 如果是旧格式迁移的数据，直接使用topics下的数据
+        if 'topics' in all_data and 'default' in all_data['topics']:
+            concepts = all_data['topics']['default'].get('concepts', {})
+        else:
+            # 构建概念字典
+            concepts = {}
+            for child_id in topic_data.get('children', []):
+                if child_id in all_data:
+                    concepts[child_id] = all_data[child_id]
+    
+    total_count = count_all_concepts(concepts)
+    completed_count = count_completed_concepts(concepts)
+    total_mastery = sum_all_mastery(concepts)
+    
+    progress_percent = (completed_count / total_count * 100) if total_count > 0 else 0
+    avg_mastery = (total_mastery / total_count) if total_count > 0 else 0
+    
+    return {
+        'total_count': total_count,
+        'completed_count': completed_count,
+        'progress_percent': progress_percent,
+        'avg_mastery': avg_mastery
+    }
+
+
+def display_concept_tree(concepts: dict, level: int = 0, prefix: str = "") -> None:
+    """递归显示概念树"""
+    concept_items = list(concepts.items())
+    for i, (concept_id, concept_data) in enumerate(concept_items):
+        is_last = i == len(concept_items) - 1
+        current_prefix = "└── " if is_last else "├── "
+        next_prefix = "    " if is_last else "│   "
+        
+        # 状态图标
+        status = concept_data.get('status', {})
+        mastery = concept_data.get('mastery', {})
+        status_icon = get_status_icon(status, mastery)
+        
+        # 掌握度显示
+        score = mastery.get('best_score_percent', -1)
+        mastery_text = f" ({score:.0f}%)" if score >= 0 else ""
+        
+        typer.echo(f"{prefix}{current_prefix}{status_icon} {concept_data.get('name', concept_id)}{mastery_text}")
+        
+        # 递归显示子概念
+        if concept_data.get('children'):
+            display_concept_tree(
+                concept_data['children'], 
+                level + 1, 
+                prefix + next_prefix
+            )
+
+
 def main():
-    """主入口函数"""
+    """主函数"""
     app()
+
 
 if __name__ == "__main__":
     main()

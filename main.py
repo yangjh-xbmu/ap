@@ -113,12 +113,13 @@ def get_file_path(topic_id: str, concept_id: str, file_type: str) -> Path:
     concept_filename = concept_id  # concept_id 已经是 slugified 的
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # 修改路径结构以匹配ap/cli.py的格式：workspace/topic/type/concept.ext
     path_mapping = {
-        "explanation": (base_path / "explanation" / topic_id / 
+        "explanation": (base_path / topic_id / "explanation" / 
                        f"{concept_filename}.md"),
-        "quiz": (base_path / "quizzes" / topic_id / 
+        "quiz": (base_path / topic_id / "quizzes" / 
                 f"{concept_filename}.yml"),
-        "result": (base_path / "results" / topic_id / 
+        "result": (base_path / topic_id / "results" / 
                   f"{concept_filename}_{timestamp}.json")
     }
     
