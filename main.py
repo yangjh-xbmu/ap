@@ -847,6 +847,292 @@ def study(concept: str):
         typer.echo(f"学习过程中发生错误: {str(e)}", err=True)
         raise typer.Exit(1)
 
+
+# ==================== 学习仪表盘功能 ====================
+
+def get_status_icon(status: dict, mastery: dict) -> str:
+    """
+    根据学习状态和掌握程度返回对应的状态图标
+    
+    Args:
+        status: 学习状态字典
+        mastery: 掌握程度字典
+        
+    Returns:
+        str: 状态图标
+    """
+    if not status.get('explained', False):
+        return "⚪"  # 未开始
+    elif status.get('quiz_taken', False):
+        score = mastery.get('best_score_percent', -1)
+        if score >= 80:
+            return "🟢"  # 已掌握
+        elif score >= 60:
+            return "🟡"  # 学习中
+        else:
+            return "🔴"  # 需复习
+    elif status.get('quiz_generated', False):
+        return "🟡"  # 学习中
+    else:
+        return "🟡"  # 学习中
+
+
+def create_progress_bar(percentage: float, width: int = 20) -> str:
+    """
+    创建进度条
+    
+    Args:
+        percentage: 完成百分比 (0-100)
+        width: 进度条宽度
+        
+    Returns:
+        str: 进度条字符串
+    """
+    filled = int(percentage / 100 * width)
+    empty = width - filled
+    return "█" * filled + "░" * empty
+
+
+def count_all_concepts(concepts: dict) -> int:
+    """
+    递归计算所有概念的总数
+    
+    Args:
+        concepts: 概念字典
+        
+    Returns:
+        int: 概念总数
+    """
+    total = len(concepts)
+    for concept_data in concepts.values():
+        if concept_data.get('children'):
+            total += count_all_concepts(concept_data['children'])
+    return total
+
+
+def count_completed_concepts(concepts: dict) -> int:
+    """
+    递归计算已完成概念的数量
+    
+    Args:
+        concepts: 概念字典
+        
+    Returns:
+        int: 已完成概念数量
+    """
+    completed = 0
+    for concept_data in concepts.values():
+        if concept_data.get('status', {}).get('explained', False):
+            completed += 1
+        if concept_data.get('children'):
+            completed += count_completed_concepts(concept_data['children'])
+    return completed
+
+
+def sum_all_mastery(concepts: dict) -> float:
+    """
+    递归计算所有概念的掌握度总和
+    
+    Args:
+        concepts: 概念字典
+        
+    Returns:
+        float: 掌握度总和
+    """
+    total_mastery = 0.0
+    for concept_data in concepts.values():
+        score = concept_data.get('mastery', {}).get('best_score_percent', -1)
+        if score >= 0:
+            total_mastery += score
+        if concept_data.get('children'):
+            total_mastery += sum_all_mastery(concept_data['children'])
+    return total_mastery
+
+
+def calculate_topic_stats(topic_data: dict) -> dict:
+    """
+    计算主题的学习统计信息
+    
+    Args:
+        topic_data: 主题数据字典
+        
+    Returns:
+        dict: 统计信息字典
+    """
+    concepts = topic_data.get('concepts', {})
+    total_concepts = count_all_concepts(concepts)
+    completed_concepts = count_completed_concepts(concepts)
+    total_mastery = sum_all_mastery(concepts)
+    
+    return {
+        'total': total_concepts,
+        'completed': completed_concepts,
+        'completion_rate': (completed_concepts / total_concepts * 100) if total_concepts > 0 else 0,
+        'avg_mastery': (total_mastery / total_concepts) if total_concepts > 0 else 0
+    }
+
+
+def display_concept_tree(concepts: dict, level: int = 0, prefix: str = "") -> None:
+    """
+    递归显示概念树
+    
+    Args:
+        concepts: 概念字典
+        level: 当前层级
+        prefix: 前缀字符串
+    """
+    concept_items = list(concepts.items())
+    for i, (concept_id, concept_data) in enumerate(concept_items):
+        is_last = i == len(concept_items) - 1
+        current_prefix = "└── " if is_last else "├── "
+        next_prefix = "    " if is_last else "│   "
+        
+        # 状态图标
+        status = concept_data.get('status', {})
+        mastery = concept_data.get('mastery', {})
+        status_icon = get_status_icon(status, mastery)
+        
+        # 掌握度显示
+        score = mastery.get('best_score_percent', -1)
+        mastery_text = f" ({score:.0f}%)" if score >= 0 else ""
+        
+        typer.echo(f"{prefix}{current_prefix}{status_icon} {concept_data.get('name', concept_id)}{mastery_text}")
+        
+        # 递归显示子概念
+        if concept_data.get('children'):
+            display_concept_tree(
+                concept_data['children'], 
+                level + 1, 
+                prefix + next_prefix
+            )
+
+
+def display_topic_details(concept_map: MultiTopicConceptMap, topic_id: str) -> None:
+    """
+    显示单个主题的详细信息
+    
+    Args:
+        concept_map: 概念地图实例
+        topic_id: 主题ID
+    """
+    try:
+        topic_data = concept_map.get_topic(topic_id)
+        topic_name = topic_data.get('name', {}).get('name', topic_id) if isinstance(topic_data.get('name'), dict) else topic_data.get('name', topic_id)
+        concepts = topic_data.get('concepts', {})
+        
+        typer.echo(f"📖 {topic_name}")
+        typer.echo("=" * 50)
+        
+        if not concepts:
+            typer.echo("📚 该主题还没有任何概念")
+            typer.echo("💡 使用 'ap m <主题名称>' 重新生成学习地图")
+            return
+        
+        # 显示概念树
+        display_concept_tree(concepts)
+        
+        # 显示统计信息
+        stats = calculate_topic_stats(topic_data)
+        typer.echo("\n📊 学习统计:")
+        typer.echo(f"   总概念数: {stats['total']}")
+        typer.echo(f"   已完成: {stats['completed']}")
+        typer.echo(f"   完成率: {stats['completion_rate']:.1f}%")
+        typer.echo(f"   平均掌握度: {stats['avg_mastery']:.1f}%")
+        
+    except Exception as e:
+        typer.echo(f"❌ 获取主题详情失败: {str(e)}")
+        raise typer.Exit(1)
+
+
+def display_global_overview(concept_map: MultiTopicConceptMap) -> None:
+    """
+    显示所有主题的概览
+    
+    Args:
+        concept_map: 概念地图实例
+    """
+    try:
+        topics = concept_map.list_topics()
+        
+        if not topics:
+            typer.echo("📚 还没有创建任何学习主题")
+            typer.echo("💡 使用 'ap m <主题名称>' 创建第一个学习地图")
+            return
+        
+        typer.echo("📊 学习进度概览")
+        typer.echo("=" * 50)
+        
+        for topic_id in topics:
+            try:
+                topic_data = concept_map.get_topic(topic_id)
+                topic_name = topic_data.get('name', {}).get('name', topic_id) if isinstance(topic_data.get('name'), dict) else topic_data.get('name', topic_id)
+                stats = calculate_topic_stats(topic_data)
+                progress_bar = create_progress_bar(stats['completion_rate'])
+                
+                typer.echo(f"📖 {topic_name}")
+                typer.echo(f"   进度: {progress_bar} {stats['completion_rate']:.1f}%")
+                typer.echo(f"   概念: {stats['completed']}/{stats['total']} 已完成")
+                typer.echo(f"   掌握度: {stats['avg_mastery']:.1f}%")
+                typer.echo()
+                
+            except Exception as e:
+                typer.echo(f"❌ 获取主题 '{topic_id}' 信息失败: {str(e)}")
+                continue
+                
+    except Exception as e:
+        typer.echo(f"❌ 获取主题列表失败: {str(e)}")
+        raise typer.Exit(1)
+
+
+def suggest_available_topics(concept_map: MultiTopicConceptMap) -> None:
+    """
+    建议可用的主题
+    
+    Args:
+        concept_map: 概念地图实例
+    """
+    try:
+        topics = concept_map.list_topics()
+        if topics:
+            topic_list = ', '.join(topics)
+            typer.echo(f"💡 可用主题: {topic_list}")
+            typer.echo("💡 使用示例: ap t <主题名称>")
+        else:
+            typer.echo("💡 使用 'ap m <主题名称>' 创建第一个学习地图")
+    except Exception:
+        typer.echo("💡 使用 'ap m <主题名称>' 创建学习地图")
+
+
+@app.command("t")
+@app.command("tree")
+@app.command("status")
+def display_tree(topic: Optional[str] = typer.Argument(None, help="主题名称（可选）")):
+    """显示学习进度树状图"""
+    try:
+        concept_map = MultiTopicConceptMap()
+        
+        if topic is None:
+            # 显示全局概览
+            display_global_overview(concept_map)
+        else:
+            # 显示单主题详情
+            topic_id = slugify(topic)
+            
+            # 检查主题是否存在
+            if not concept_map.topic_exists(topic_id):
+                typer.echo(f"❌ 主题 '{topic}' 不存在")
+                suggest_available_topics(concept_map)
+                raise typer.Exit(1)
+            
+            display_topic_details(concept_map, topic_id)
+            
+    except typer.Exit:
+        raise
+    except Exception as e:
+        typer.echo(f"❌ 显示失败: {str(e)}")
+        raise typer.Exit(1)
+
+
 def main():
     """主函数"""
     app()

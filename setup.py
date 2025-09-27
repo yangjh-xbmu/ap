@@ -9,12 +9,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+    requirements = [line.strip() for line in fh if line.strip()
+                    and not line.startswith("#")]
 
 setup(
     name="ap-cli",
-    version="1.4.0",
-    author="AP CLI Team",
+    version="1.6.0",
+    author="yangjh",
     author_email="yangjh@xbmu.edu.cn",
     description="一个帮助用户通过提问-生成-测验循环来学习新概念的命令行工具",
     long_description=long_description,
