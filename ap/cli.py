@@ -843,10 +843,16 @@ def display_global_overview(concept_map):
                 stats = calculate_topic_stats_direct(concepts)
                 progress_bar = create_progress_bar(stats['progress_percent'])
                 
-                typer.echo(f"\n🎯 {topic_data.get('name', topic_id)}")
+                # 获取主题名称，处理嵌套的name结构
+                topic_name = topic_data.get('name', topic_id)
+                if isinstance(topic_name, dict):
+                    topic_name = topic_name.get('name', topic_id)
+                
+                typer.echo(f"📖 {topic_name}")
                 typer.echo(f"   进度: {progress_bar} {stats['progress_percent']:.1f}%")
                 typer.echo(f"   概念: {stats['completed_count']}/{stats['total_count']} 已完成")
                 typer.echo(f"   掌握度: {stats['avg_mastery']:.1f}%")
+                typer.echo()
         except Exception as e:
             typer.echo(f"❌ 获取主题 '{topic_id}' 信息失败: {str(e)}")
     
@@ -877,27 +883,30 @@ def display_topic_details(concept_map, topic_id):
         typer.echo(f"❌ 主题 '{topic_id}' 不存在")
         return
     
-    # 主题信息
-    typer.echo(f"🎯 {topic_data.get('name', topic_id)}")
-    typer.echo(f"创建时间: {topic_data.get('created_at', 'Unknown')}")
+    # 获取主题名称，处理嵌套的name结构
+    topic_name = topic_data.get('name', topic_id)
+    if isinstance(topic_name, dict):
+        topic_name = topic_name.get('name', topic_id)
     
-    # 学习统计
-    stats = calculate_topic_stats(topic_data)
-    progress_bar = create_progress_bar(stats['progress_percent'])
+    typer.echo(f"📖 {topic_name}")
+    typer.echo("=" * 50)
     
-    typer.echo(f"\n📊 学习统计")
-    typer.echo(f"总体进度: {progress_bar} {stats['progress_percent']:.1f}%")
-    typer.echo(f"概念总数: {stats['total_count']}")
-    typer.echo(f"已完成: {stats['completed_count']}")
-    typer.echo(f"平均掌握度: {stats['avg_mastery']:.1f}%")
-    
-    # 概念结构
-    typer.echo(f"\n🌳 概念结构")
+    # 获取概念数据
     concepts = topic_data.get('concepts', {})
+    
+    # 显示概念树
     if concepts:
         display_concept_tree(concepts)
     else:
         typer.echo("暂无概念数据")
+    
+    # 显示统计信息
+    stats = calculate_topic_stats_direct(concepts)
+    typer.echo("\n📊 学习统计:")
+    typer.echo(f"   总概念数: {stats['total_count']}")
+    typer.echo(f"   已完成: {stats['completed_count']}")
+    typer.echo(f"   完成率: {stats['progress_percent']:.1f}%")
+    typer.echo(f"   平均掌握度: {stats['avg_mastery']:.1f}%")
 
 
 def suggest_available_topics(concept_map):
