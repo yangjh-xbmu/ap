@@ -7,7 +7,6 @@ AP CLI - 命令行学习工具
 import os
 import re
 import json
-import sys
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -306,7 +305,9 @@ def create_quiz_prompt(concept: str, explanation_content: str, num_questions: in
 解释文档内容：
 {explanation_content}
 
-请严格按照以下 YAML 格式输出，不要包含任何额外的解释或代码块标记：
+请严格按照以下 YAML 格式输出，不要包含任何额外的解释或代码块标记。
+
+重要：为确保答案分布均匀，请在生成题目时自动随机化正确答案的位置。不要让正确答案总是出现在第一个或固定位置。
 
 - question: "第一题的问题内容"
   options:
@@ -329,7 +330,9 @@ def create_quiz_prompt(concept: str, explanation_content: str, num_questions: in
 3. 答案必须是选项中的完整文本
 4. 题目难度适中，既不过于简单也不过于困难
 5. 涵盖概念的不同方面，确保每个主要知识点都有对应的题目
-6. 题目应该平衡分布在各个知识点上，避免某个方面过度集中"""
+6. 题目应该平衡分布在各个知识点上，避免某个方面过度集中
+7. 正确答案应该随机分布在不同位置（A、B、C、D），避免集中在某个选项
+8. 每道题的正确答案位置应该是随机的，整体分布应该接近均匀（约25%在每个位置）"""
 
 
 @app.command("g")
@@ -414,6 +417,58 @@ def generate_quiz(
         )
 
         quiz_content = response.choices[0].message.content.strip()
+
+        # 解析生成的YAML内容进行质量检查
+        was_improved = False
+        try:
+            quiz_data = yaml.safe_load(quiz_content)
+            if not isinstance(quiz_data, list):
+                raise ValueError("测验数据格式不正确")
+            
+            # 导入质量检查器
+            from ap.core.quiz_quality_checker import QuizQualityChecker
+            from ap.core.quality_monitor import QualityMonitor
+            quality_checker = QuizQualityChecker()
+            
+            # 分析答案分布
+            analysis_result = quality_checker.analyze_answer_distribution(quiz_data)
+            
+            if "error" not in analysis_result:
+                quality_score = analysis_result.get('quality_score', 0)
+                
+                # 如果质量分数低于80，进行静默答案随机化
+                if quality_score < 80:
+                    shuffled_quiz, shuffle_stats = quality_checker.shuffle_quiz_answers(quiz_data)
+                    
+                    # 重新分析随机化后的分布
+                    new_analysis = quality_checker.analyze_answer_distribution(shuffled_quiz)
+                    
+                    # 使用随机化后的数据
+                    quiz_data = shuffled_quiz
+                    analysis_result = new_analysis
+                    was_improved = True
+                
+                # 记录到质量监控系统（静默）
+                try:
+                    monitor = QualityMonitor(WORKSPACE_DIR)
+                    # 准备质量数据，包含改进状态和答案分布信息
+                    quality_data_with_improvement = {
+                        'total_questions': analysis_result.get('total_questions', 0),
+                        'quality_score': analysis_result.get('quality_score', 0),
+                        'answer_distribution': analysis_result.get('position_probabilities', {}),
+                        'improved': was_improved,
+                        'improvement_details': analysis_result.get('uniform_distribution_check', {})
+                    }
+                    monitor.record_quiz_quality(concept, quality_data_with_improvement)
+                except Exception:
+                    pass  # 静默处理监控错误
+                
+                # 将处理后的数据转换回YAML格式
+                quiz_content = yaml.dump(quiz_data, default_flow_style=False, 
+                                       allow_unicode=True, sort_keys=False)
+            
+        except Exception:
+            pass  # 静默处理质量检查错误
 
         # 保存到文件
         with open(quiz_file, 'w', encoding='utf-8') as f:
@@ -620,51 +675,6 @@ def quiz(concept: str):
         raise typer.Exit(1)
 
 
-@app.command("s")
-def study(concept: str):
-    """
-    一键完成学习流程：生成解释文档 -> 创建测验题目 -> 运行交互式测验
-
-    Args:
-        concept: 要学习的概念名称
-    """
-    typer.echo(f"开始学习 '{concept}' 的完整流程...")
-    typer.echo("=" * 50)
-
-    try:
-        # 步骤1: 生成解释文档
-        typer.echo("步骤 1/3: 生成概念解释文档...")
-        explain(concept)
-        typer.echo("步骤 1/3: 完成")
-        typer.echo()
-
-        # 步骤2: 生成测验题目
-        typer.echo("步骤 2/3: 生成测验题目...")
-        generate_quiz(concept, num_questions=None, mode="auto")
-        typer.echo("步骤 2/3: 完成")
-        typer.echo()
-
-        # 步骤3: 运行交互式测验
-        typer.echo("步骤 3/3: 开始交互式测验...")
-        typer.echo("=" * 50)
-        quiz(concept)
-
-        typer.echo()
-        typer.echo("=" * 50)
-        typer.echo(f"学习流程完成！'{concept}' 的完整学习已结束。")
-
-    except typer.Exit as e:
-        typer.echo()
-        typer.echo("=" * 50)
-        typer.echo(f"学习流程中断：在处理 '{concept}' 时发生错误。", err=True)
-        raise e
-    except Exception as e:
-        typer.echo()
-        typer.echo("=" * 50)
-        typer.echo(f"学习流程失败：{str(e)}", err=True)
-        raise typer.Exit(1)
-
-
 def create_map_prompt(topic: str) -> str:
     """
     创建用于生成学习地图的提示词
@@ -694,7 +704,6 @@ def create_map_prompt(topic: str) -> str:
 
 
 @app.command("m")
-@app.command("map")
 def generate_map(topic: str):
     """
     生成学习地图 - 将宏观主题拆解为结构化学习路径
@@ -797,9 +806,52 @@ def generate_map(topic: str):
         raise typer.Exit(1)
 
 
+@app.command("s")
+def study(concept: str):
+    """
+    一键完成学习流程：生成解释文档 -> 创建测验题目 -> 运行交互式测验
+
+    Args:
+        concept: 要学习的概念名称
+    """
+    typer.echo(f"开始学习 '{concept}' 的完整流程...")
+    typer.echo("=" * 50)
+
+    try:
+        # 步骤1: 生成解释文档
+        typer.echo("步骤 1/3: 生成概念解释文档...")
+        explain(concept)
+        typer.echo("步骤 1/3: 完成")
+        typer.echo()
+
+        # 步骤2: 生成测验题目
+        typer.echo("步骤 2/3: 生成测验题目...")
+        generate_quiz(concept, num_questions=None, mode="auto")
+        typer.echo("步骤 2/3: 完成")
+        typer.echo()
+
+        # 步骤3: 运行交互式测验
+        typer.echo("步骤 3/3: 开始交互式测验...")
+        typer.echo("=" * 50)
+        quiz(concept)
+
+        typer.echo()
+        typer.echo("=" * 50)
+        typer.echo(f"学习流程完成！'{concept}' 的完整学习已结束。")
+
+    except typer.Exit as e:
+        typer.echo()
+        typer.echo("=" * 50)
+        typer.echo(f"学习流程中断：在处理 '{concept}' 时发生错误。", err=True)
+        raise e
+    except Exception as e:
+        typer.echo()
+        typer.echo("=" * 50)
+        typer.echo(f"学习流程失败：{str(e)}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command("t")
-@app.command("tree")
-@app.command("status")
 def display_tree(topic: Optional[str] = typer.Argument(None, help="主题名称（可选）")):
     """显示学习进度树状图"""
     try:
@@ -1078,4 +1130,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    app()
