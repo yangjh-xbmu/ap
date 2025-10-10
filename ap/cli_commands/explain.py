@@ -54,18 +54,12 @@ def analyze_document_structure(content: str) -> dict:
     total_knowledge_points = (section_count + subsection_count + 
                               code_blocks + examples)
 
-    # 改进题目数量推荐算法，设置合理上限
+    # 题目数量推荐算法：与知识点数量保持一致
     if total_knowledge_points <= 3:
         recommended = 3  # 最少3道题
-    elif total_knowledge_points <= 8:
-        recommended = total_knowledge_points + 1  # 稍微多一点覆盖
-    elif total_knowledge_points <= 15:
-        recommended = total_knowledge_points
-    elif total_knowledge_points <= 25:
-        recommended = min(20, total_knowledge_points)  # 适度控制
     else:
-        # 对于复杂内容，设置合理上限
-        recommended = min(25, max(15, total_knowledge_points // 2))
+        # 题目数量应该与知识点数量匹配，确保充分覆盖
+        recommended = total_knowledge_points
 
     return {
         'section_count': total_knowledge_points,  # 返回总知识点数量
