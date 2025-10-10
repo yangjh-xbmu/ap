@@ -7,6 +7,7 @@ from ap.cli_commands.explain import explain
 from ap.cli_commands.generate_quiz import generate_quiz
 from ap.cli_commands.quiz import quiz
 from ap.cli_commands.study import study
+from ap.cli_commands.init_config import init_config
 
 # 初始化 Typer 应用
 app = typer.Typer(
@@ -18,6 +19,7 @@ app = typer.Typer(
 
 # 将命令注册到 Typer 应用
 # 每个命令的实现都委托给对应的模块
+app.command("i", help="初始化配置：设置 DEEPSEEK_API_KEY")(init_config)
 app.command("m", help="为指定主题生成学习地图")(generate_map)
 app.command("t", help="显示全局或特定主题的学习进度树状图")(display_tree)
 app.command("e", help="生成概念的详细解释文档")(explain)
