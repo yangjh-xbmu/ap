@@ -3,8 +3,8 @@
 ## 📋 基本信息
 
 - **Task ID**: task-007-conceptmap-multi-topic-refactor
-- **所属 Feature**: [Feature-001: 多主题数据架构](../feature-001-multi-topic-data-architecture.md)
-- **所属 Epic**: [Epic-001: 多主题学习系统](../../epic-001-multi-topic-learning-system.md)
+- **所属 Feature**: [Feature-001: 多主题数据架构](../../feature-001-multi-topic-data-architecture)
+- **所属 Epic**: [Epic-001: 多主题学习系统](../../../epic-001-multi-topic-learning-system)
 - **状态**: 待开始
 - **优先级**: 高
 - **负责人**: 开发者
