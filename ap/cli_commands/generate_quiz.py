@@ -60,43 +60,26 @@ def create_quiz_prompt(concept: str, explanation_content: str,
 生成 {num_questions} 道题目："""
 
 
-def generate_quiz(
+def generate_quiz_internal(
     concept: str,
-    num_questions: int = typer.Option(
-        None,
-        "--num-questions",
-        "-n",
-        help="指定题目数量（默认为智能分析）",
-        min=3,
-        max=50
-    ),
-    mode: str = typer.Option(
-        "auto",
-        "--mode",
-        help="生成模式：auto（智能分析）或 fixed（固定模式）"
-    ),
-    max_tokens: int = typer.Option(
-        32768,
-        "--max-tokens",
-        help="最大输出长度（默认32K，最大64K）",
-        min=1000,
-        max=65536
-    )
+    num_questions: int = None,
+    mode: str = "auto",
+    max_tokens: int = 32768
 ):
     """
-    基于解释文档生成测验题目
+    内部调用版本的生成测验函数，避免typer.Option序列化问题
 
     Args:
         concept: 要生成测验的概念名称
-        num_questions: 题目数量（可选，默认智能分析）
-        mode: 生成模式 (auto/fixed，默认auto)
+        num_questions: 指定题目数量（默认为智能分析）
+        mode: 生成模式：auto（智能分析）或 fixed（固定模式）
         max_tokens: 最大输出长度（默认32K，最大64K）
     """
     try:
-        # 获取概念所属的主题（与 explain 函数保持一致）
+        # 创建概念地图实例
         concept_map = ConceptMap()
 
-        # 处理概念名称：如果包含主题前缀，只使用概念部分作为文件名（与 explain 函数保持一致）
+        # 处理概念名称
         if '/' in concept:
             topic_slug, concept_part = concept.split('/', 1)
             concept_slug = slugify(concept_part)
@@ -106,57 +89,32 @@ def generate_quiz(
             topic_slug = concept_map.get_topic_by_concept(concept_slug)
             if not topic_slug:
                 print(f"错误：找不到概念 '{concept}' 所属的主题。")
-                raise
+                return
 
-        # 构造解释文档路径 - 按主题组织
-        explanation_file = WORKSPACE_DIR / topic_slug / \
-            "explanation" / f"{concept_slug}.md"
+        # 构造解释文档路径
+        explanation_dir = WORKSPACE_DIR / topic_slug / "explanation"
+        explanation_file = explanation_dir / f"{concept_slug}.md"
 
-        # 检查解释文档是否存在
         if not explanation_file.exists():
-            print(f"错误: 未找到 '{concept}' 的解释文档。")
-            print(f"请先运行 'ap e \"{concept}\"'。")
-            raise FileNotFoundError(f"解释文档不存在: {explanation_file}")
+            print(f"错误：找不到解释文档 {explanation_file}")
+            print("请先运行 'ap e' 命令生成解释文档")
+            return
 
         # 读取解释文档内容
         with open(explanation_file, 'r', encoding='utf-8') as f:
             explanation_content = f.read()
 
-        # 优化题目数量决定逻辑
-        if num_questions is not None:
-            # 用户明确指定了题目数量
-            if num_questions < 3:
-                print(
-                    f"警告: 题目数量 {num_questions} 少于最小值 3，"
-                    f"已自动调整为 3"
-                )
-                num_questions = max(3, num_questions)
-            elif num_questions > 50:
-                print(
-                    f"警告: 题目数量 {num_questions} 过多，建议不超过50道，"
-                    f"但仍将按要求生成"
-                )
-            print(f"🎯 用户指定: 生成 {num_questions} 道题目")
-        else:
-            # 用户未指定题目数量，根据模式决定
-            if mode == "auto":
-                # 智能模式：分析文档结构
-                analysis = analyze_document_structure(explanation_content)
-                num_questions = analysis['recommended_questions']
-                print(
-                    f"📊 智能分析: 发现 {analysis['section_count']} 个主要知识点，"
-                    f"建议生成 {num_questions} 道题目"
-                )
-            else:
-                # 固定模式：使用默认值
-                num_questions = 5
-                print(f"🔧 固定模式: 使用默认值生成 {num_questions} 道题目")
+        # 智能分析题目数量
+        if num_questions is None and mode == "auto":
+            analysis = analyze_document_structure(explanation_content)
+            num_questions = analysis['recommended_questions']
+            print(
+                f"📊 智能分析: 发现 {analysis['section_count']} 个主要知识点，"
+                f"建议生成 {num_questions} 道题目"
+            )
 
-        # 确保题目数量在合理范围内
-        if num_questions < 3:
-            num_questions = 3
-        elif num_questions > 25:  # 设置合理上限
-            print(f"⚠️ 题目数量 {num_questions} 过多，已调整为 25 道")
+        # 如果仍然没有指定数量，使用默认值
+        if num_questions is None:
             num_questions = 25
 
         # 确保按主题组织的 quizzes 目录存在
@@ -194,11 +152,9 @@ def generate_quiz(
                 raise ValueError(f"第 {i+1} 题不是字典格式")
 
             required_fields = ['question', 'options', 'answer', 'explanation']
-            missing_fields = [field for field in required_fields
-                              if field not in question]
-            if missing_fields:
-                fields_str = ', '.join(missing_fields)
-                raise ValueError(f"第 {i+1} 题缺少字段: {fields_str}")
+            for field in required_fields:
+                if field not in question:
+                    raise ValueError(f"第 {i+1} 题缺少必需字段: {field}")
 
             # 验证选项格式
             options = question.get('options', {})
@@ -271,3 +227,44 @@ def generate_quiz(
     except Exception as e:
         print(f"❌ 生成测验时发生严重错误: {str(e)}")
         raise
+
+
+def generate_quiz(
+    concept: str,
+    num_questions: int = typer.Option(
+        None,
+        "--num-questions",
+        "-n",
+        help="指定题目数量（默认为智能分析）",
+        min=3,
+        max=50
+    ),
+    mode: str = typer.Option(
+        "auto",
+        "--mode",
+        help="生成模式：auto（智能分析）或 fixed（固定模式）"
+    ),
+    max_tokens: int = typer.Option(
+        32768,
+        "--max-tokens",
+        help="最大输出长度（默认32K，最大64K）",
+        min=1000,
+        max=65536
+    )
+):
+    """
+    基于解释文档生成测验题目
+
+    Args:
+        concept: 要生成测验的概念名称
+        num_questions: 题目数量（可选，默认智能分析）
+        mode: 生成模式 (auto/fixed，默认auto)
+        max_tokens: 最大输出长度（默认32K，最大64K）
+    """
+    # 调用内部版本，避免typer.Option序列化问题
+    return generate_quiz_internal(
+        concept=concept,
+        num_questions=num_questions,
+        mode=mode,
+        max_tokens=max_tokens
+    )

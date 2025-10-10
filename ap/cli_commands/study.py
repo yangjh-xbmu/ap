@@ -1,5 +1,5 @@
 from ap.cli_commands.explain import explain
-from ap.cli_commands.generate_quiz import generate_quiz
+from ap.cli_commands.generate_quiz import generate_quiz_internal
 from ap.cli_commands.quiz import quiz
 
 
@@ -22,7 +22,7 @@ def study(concept: str):
 
         # 步骤2: 生成测验题目
         print("步骤 2/3: 生成测验题目...")
-        generate_quiz(concept, num_questions=None, mode="auto")
+        generate_quiz_internal(concept, num_questions=None, mode="auto")
         print("步骤 2/3: 完成")
         print()
 
