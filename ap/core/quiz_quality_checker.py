@@ -5,14 +5,11 @@
 1. 正确答案在各个位置的分布符合均匀随机分布
 2. 正确答案为选项2的概率不超过随机分布预期值
 3. 提供答案位置随机化功能
-4. 生成质量检查报告
 """
 
 import random
 from collections import Counter
-from pathlib import Path
 from typing import Dict, List, Tuple
-from datetime import datetime
 
 
 class QuizQualityChecker:
@@ -149,83 +146,62 @@ class QuizQualityChecker:
     
     def shuffle_quiz_answers(self, quiz_data: List[Dict]) -> Tuple[List[Dict], Dict]:
         """
-        随机化测验题目的答案位置
+        随机化测验题目的正确答案位置
         
         Args:
-            quiz_data: 原始测验数据
+            quiz_data: 原始测验题目数据
             
         Returns:
-            (随机化后的测验数据, 随机化统计信息)
+            Tuple[随机化后的测验数据, 统计信息]
         """
         shuffled_quiz = []
-        shuffle_stats = {"position_changes": [], "target_distribution": []}
+        position_changes = []
         
-        # 预先计算目标分布，确保均匀性
-        total_questions = len(quiz_data)
-        target_positions = []
-        
-        # 为每个位置分配大致相等的题目数量
-        for position in range(1, 5):
-            count = total_questions // 4
-            if position <= total_questions % 4:
-                count += 1
-            target_positions.extend([position] * count)
-        
-        # 随机打乱目标位置
-        random.shuffle(target_positions)
-        
-        for i, question in enumerate(quiz_data):
+        for question in quiz_data:
             if not all(key in question for key in ['question', 'options', 'answer']):
                 shuffled_quiz.append(question)
                 continue
+                
+            # 复制题目数据
+            new_question = question.copy()
+            options = question['options'].copy()
+            correct_answer = question['answer']
             
-            original_answer = question['answer']
-            original_options = question['options'][:]
-            
-            # 找到原始正确答案位置
+            # 找到当前正确答案的位置
             try:
-                original_position = original_options.index(original_answer) + 1
+                current_position = options.index(correct_answer)
             except ValueError:
+                # 如果找不到正确答案，保持原样
                 shuffled_quiz.append(question)
                 continue
             
-            # 获取目标位置
-            target_position = target_positions[i] if i < len(target_positions) else random.randint(1, 4)
+            # 随机选择新位置
+            new_position = random.randint(0, len(options) - 1)
             
-            # 重新排列选项
-            new_options = original_options[:]
-            random.shuffle(new_options)
-            
-            # 确保正确答案在目标位置
-            if original_answer in new_options:
-                current_pos = new_options.index(original_answer)
-                target_index = target_position - 1
+            # 如果位置不同，进行交换
+            if new_position != current_position:
+                # 交换选项位置
+                options[current_position], options[new_position] = options[new_position], options[current_position]
                 
-                # 交换位置
-                new_options[current_pos], new_options[target_index] = \
-                    new_options[target_index], new_options[current_pos]
+                # 记录位置变化
+                position_changes.append({
+                    'question_index': len(shuffled_quiz),
+                    'old_position': current_position + 1,
+                    'new_position': new_position + 1
+                })
             
-            # 创建新的题目
-            shuffled_question = {
-                "question": question['question'],
-                "options": new_options,
-                "answer": original_answer
-            }
-            
-            shuffled_quiz.append(shuffled_question)
-            
-            # 记录统计信息
-            shuffle_stats["position_changes"].append({
-                "question_index": i,
-                "original_position": original_position,
-                "target_position": target_position
-            })
+            new_question['options'] = options
+            shuffled_quiz.append(new_question)
         
-        # 统计目标分布
-        target_counter = Counter(target_positions)
-        shuffle_stats["target_distribution"] = dict(target_counter)
+        # 统计信息
+        stats = {
+            'total_questions': len(quiz_data),
+            'shuffled_questions': len(position_changes),
+            'shuffle_rate': len(position_changes) / len(quiz_data) if quiz_data else 0,
+            'position_changes': position_changes
+        }
         
-        return shuffled_quiz, shuffle_stats
+        return shuffled_quiz, stats
     
     def generate_quality_report(self, analysis_result: Dict, concept: str) -> str:
         """生成质量检查报告"""

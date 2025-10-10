@@ -16,6 +16,8 @@ import yaml
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from ap.core.concept_map import ConceptMap
+
 # 加载环境变量 - 从当前工作目录查找 .env 文件
 load_dotenv(dotenv_path=Path.cwd() / '.env')
 
@@ -24,60 +26,6 @@ app = typer.Typer(help="AP CLI - 命令行学习工具")
 
 # 工作区目录
 WORKSPACE_DIR = Path("workspace")
-
-
-class ConceptMap:
-    """概念地图管理类"""
-
-    def __init__(self, file_path: str = None):
-        if file_path is None:
-            file_path = WORKSPACE_DIR / "concept_map.json"
-        self.file_path = Path(file_path)
-        self.data = self.load()
-
-    def load(self) -> dict:
-        """加载现有概念地图"""
-        if self.file_path.exists():
-            try:
-                with open(self.file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                typer.echo(f"警告：无法读取概念地图文件 {self.file_path}: {e}", err=True)
-                return {}
-        return {}
-
-    def save(self) -> None:
-        """保存概念地图到文件"""
-        # 确保目录存在
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            with open(self.file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
-        except IOError as e:
-            typer.echo(f"错误：无法保存概念地图文件 {self.file_path}: {e}", err=True)
-            raise typer.Exit(1)
-
-    def add_concept(self, concept_id: str, concept_data: dict) -> None:
-        """添加新概念到地图"""
-        self.data[concept_id] = concept_data
-
-    def update_status(self, concept_id: str, status_key: str, value) -> None:
-        """更新概念状态"""
-        if concept_id in self.data:
-            if 'status' not in self.data[concept_id]:
-                self.data[concept_id]['status'] = {}
-            self.data[concept_id]['status'][status_key] = value
-
-    def update_mastery(self, concept_id: str, score_percent: float) -> None:
-        """更新概念掌握程度"""
-        if concept_id in self.data:
-            if 'mastery' not in self.data[concept_id]:
-                self.data[concept_id]['mastery'] = {}
-            current_best = self.data[concept_id]['mastery'].get(
-                'best_score_percent', -1)
-            if score_percent > current_best:
-                self.data[concept_id]['mastery']['best_score_percent'] = score_percent
 
 
 def slugify(text: str) -> str:
@@ -427,7 +375,6 @@ def generate_quiz(
             
             # 导入质量检查器
             from ap.core.quiz_quality_checker import QuizQualityChecker
-            from ap.core.quality_monitor import QualityMonitor
             quality_checker = QuizQualityChecker()
             
             # 分析答案分布
@@ -448,20 +395,8 @@ def generate_quiz(
                     analysis_result = new_analysis
                     was_improved = True
                 
-                # 记录到质量监控系统（静默）
-                try:
-                    monitor = QualityMonitor(WORKSPACE_DIR)
-                    # 准备质量数据，包含改进状态和答案分布信息
-                    quality_data_with_improvement = {
-                        'total_questions': analysis_result.get('total_questions', 0),
-                        'quality_score': analysis_result.get('quality_score', 0),
-                        'answer_distribution': analysis_result.get('position_probabilities', {}),
-                        'improved': was_improved,
-                        'improvement_details': analysis_result.get('uniform_distribution_check', {})
-                    }
-                    monitor.record_quiz_quality(concept, quality_data_with_improvement)
-                except Exception:
-                    pass  # 静默处理监控错误
+                # 记录到质量监控系统已被移除
+                # 质量检查和改进功能保留，但不再记录监控数据
                 
                 # 将处理后的数据转换回YAML格式
                 quiz_content = yaml.dump(quiz_data, default_flow_style=False, 
@@ -626,9 +561,8 @@ def quiz(concept: str):
 
         typer.echo(f"测验结果已保存到: {result_file}")
 
-        # 使用新的多主题ConceptMap
-        from ap.core.concept_map import ConceptMap as MultiTopicConceptMap
-        concept_map = MultiTopicConceptMap()
+        # 使用多主题ConceptMap
+        concept_map = ConceptMap()
 
         # 获取概念所属的主题
         topic = get_concept_topic(concept)
@@ -757,7 +691,7 @@ def generate_map(topic: str):
             raise typer.Exit(1)
 
         # 创建概念地图管理器
-        from ap.core.concept_map import ConceptMap, slugify as concept_slugify
+        from ap.core.concept_map import slugify as concept_slugify
         concept_map = ConceptMap()
 
         # 处理主概念
@@ -855,13 +789,8 @@ def study(concept: str):
 def display_tree(topic: Optional[str] = typer.Argument(None, help="主题名称（可选）")):
     """显示学习进度树状图"""
     try:
-        # 导入多主题ConceptMap
-        import sys
-        from pathlib import Path
-        sys.path.append(str(Path(__file__).parent.parent))
-        from ap.core.concept_map import ConceptMap as MultiTopicConceptMap
-
-        concept_map = MultiTopicConceptMap()
+        # 使用多主题ConceptMap
+        concept_map = ConceptMap()
 
         if topic is None:
             # 显示全局概览
@@ -1065,8 +994,7 @@ def calculate_topic_stats(topic_data: dict) -> dict:
     # 如果concepts是空的，尝试从children构建概念字典
     if not concepts and 'children' in topic_data:
         # 从当前概念地图中获取所有概念
-        from ap.core.concept_map import ConceptMap as MultiTopicConceptMap
-        concept_map = MultiTopicConceptMap()
+        concept_map = ConceptMap()
         all_data = concept_map.data
 
         # 如果是旧格式迁移的数据，直接使用topics下的数据
