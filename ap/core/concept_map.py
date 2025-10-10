@@ -65,14 +65,18 @@ class ConceptMap:
         # 新格式必须包含 topics 和 metadata
         if "topics" in data and "metadata" in data:
             return False
-        
-        # 旧格式：直接包含概念数据，没有 topics 层级
-        return any(isinstance(v, dict) and "name" in v for v in data.values())
     
-    def _migrate_from_old_format(self, old_data: Dict[str, Any]) -> Dict[str, Any]:
+        # 旧格式：直接包含概念数据，没有 topics 层级
+        return any(
+            isinstance(v, dict) and "name" in v for v in data.values()
+        )
+    
+    def _migrate_from_old_format(
+        self, old_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """从旧格式迁移到新格式"""
         new_data = self._create_empty_structure()
-        
+    
         # 将所有旧数据迁移到 "default" 主题下
         if old_data:
             new_data["topics"]["default"] = {
@@ -122,7 +126,7 @@ class ConceptMap:
                 "created_at": datetime.now().isoformat(),
                 "concepts": {}
             }
-            
+    
             # 更新活跃主题列表
             if topic_id not in self.data["metadata"]["active_topics"]:
                 self.data["metadata"]["active_topics"].append(topic_id)
@@ -176,9 +180,11 @@ class ConceptMap:
                 self.data["metadata"]["active_topics"].remove(topic_id)
             return True
         return False
-    
+
     # 概念管理方法
-    def add_concept(self, topic_id: str, concept_id: str, concept_data: Dict[str, Any]) -> None:
+    def add_concept(
+        self, topic_id: str, concept_id: str, concept_data: Dict[str, Any]
+    ) -> None:
         """
         添加概念到指定主题
         
@@ -189,10 +195,12 @@ class ConceptMap:
         """
         if topic_id not in self.data["topics"]:
             raise ValueError(f"主题 '{topic_id}' 不存在")
-        
+
         self.data["topics"][topic_id]["concepts"][concept_id] = concept_data
-    
-    def get_concept(self, topic_id: str, concept_id: str) -> Optional[Dict[str, Any]]:
+
+    def get_concept(
+        self, topic_id: str, concept_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         获取指定概念
         
@@ -223,8 +231,10 @@ class ConceptMap:
             if 'status' not in concept:
                 concept['status'] = {}
             concept['status'][status_key] = value
-    
-    def update_mastery(self, topic_id: str, concept_id: str, score_percent: float) -> None:
+
+    def update_mastery(
+        self, topic_id: str, concept_id: str, score_percent: float
+    ) -> None:
         """
         更新概念掌握程度
         
@@ -237,10 +247,12 @@ class ConceptMap:
         if concept:
             if 'mastery' not in concept:
                 concept['mastery'] = {}
-            current_best = concept['mastery'].get('best_score_percent', -1)
+            current_best = concept['mastery'].get(
+                'best_score_percent', -1
+            )
             if score_percent > current_best:
                 concept['mastery']['best_score_percent'] = score_percent
-    
+
     # 兼容性方法（用于向后兼容）
     def get_default_topic_id(self) -> Optional[str]:
         """
@@ -272,17 +284,35 @@ class ConceptMap:
             flat_concepts.update(topic_data["concepts"])
         return flat_concepts
 
+    def get_topic_by_concept(self, concept_id: str) -> Optional[str]:
+        """
+        根据概念ID查找其所属的主题ID
+
+        Args:
+            concept_id: 概念ID
+
+        Returns:
+            主题ID，如果未找到则返回 None
+        """
+        for topic_id, topic_data in self.data["topics"].items():
+            if concept_id in topic_data["concepts"]:
+                return topic_id
+        return None
+
 
 def slugify(text: str) -> str:
     """
-    将文本转换为适合作为ID的格式
+    将文本转换为适合作为文件名或ID的格式
     
     Args:
-        text: 输入文本
+        text: 要转换的文本
         
     Returns:
         转换后的ID格式字符串
     """
+    if not text:
+        return ""
+    
     # 移除或替换特殊字符
     text = re.sub(r'[^\w\s-]', '', text.strip())
     # 将空格替换为连字符

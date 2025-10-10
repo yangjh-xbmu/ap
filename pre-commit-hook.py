@@ -15,29 +15,17 @@ Pre-commit Hook Script for AP CLI
 - 文档更新：不更新版本号
 """
 
-import os
 import re
 import sys
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
-from openai import OpenAI
+
+from ap.core.utils import get_deepseek_client
 
 # 加载环境变量
 load_dotenv()
 
-def get_deepseek_client():
-    """获取DeepSeek API客户端"""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        print("错误：未找到DEEPSEEK_API_KEY环境变量")
-        print("请在.env文件中设置您的DeepSeek API密钥")
-        sys.exit(1)
-    
-    return OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com"
-    )
 
 def get_staged_changes():
     """获取暂存区的变更内容"""
@@ -49,8 +37,10 @@ def get_staged_changes():
             text=True,
             check=True
         )
-        staged_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
-        
+        staged_files = (
+            result.stdout.strip().split('\n') if result.stdout.strip() else []
+        )
+
         # 获取暂存的变更内容
         result = subprocess.run(
             ["git", "diff", "--cached"],
@@ -59,11 +49,12 @@ def get_staged_changes():
             check=True
         )
         staged_diff = result.stdout
-        
+
         return staged_files, staged_diff
     except subprocess.CalledProcessError as e:
         print(f"获取Git变更失败: {e}")
         return [], ""
+
 
 def get_commit_message():
     """获取提交信息"""
@@ -76,15 +67,16 @@ def get_commit_message():
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-        
+
         # 如果没有提交信息，返回空字符串
         return ""
     except subprocess.CalledProcessError:
         return ""
 
+
 def analyze_changes_with_llm(client, staged_files, staged_diff, commit_msg=""):
     """使用LLM分析变更内容并判断版本更新类型"""
-    
+
     # 构建分析提示
     prompt = f"""
 请分析以下Git提交的变更内容，判断应该如何更新版本号。
@@ -127,25 +119,27 @@ def analyze_changes_with_llm(client, staged_files, staged_diff, commit_msg=""):
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "你是一个专业的软件版本管理助手，能够准确判断代码变更对版本号的影响。"},
+                {"role": "system",
+                 "content": "你是一个专业的软件版本管理助手，能够准确判断代码变更对版本号的影响。"},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=50,
             temperature=0.1
         )
-        
+
         result = response.choices[0].message.content.strip().upper()
-        
+
         # 验证返回结果
         if result in ["MAJOR", "MINOR", "PATCH", "NONE"]:
             return result
         else:
             print(f"LLM返回了意外的结果: {result}")
             return "NONE"
-            
+
     except Exception as e:
         print(f"LLM分析失败: {e}")
         return "NONE"
+
 
 def get_current_version():
     """从setup.py获取当前版本号"""
@@ -153,31 +147,32 @@ def get_current_version():
     if not setup_path.exists():
         print("错误：找不到setup.py文件")
         return None
-    
+
     content = setup_path.read_text(encoding="utf-8")
-    
+
     # 匹配版本号
     version_match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
     if version_match:
         return version_match.group(1)
-    
+
     print("错误：在setup.py中找不到版本号")
     return None
+
 
 def increment_version(current_version, update_type):
     """根据更新类型递增版本号"""
     if update_type == "NONE":
         return current_version
-    
+
     try:
         # 解析版本号
         parts = current_version.split(".")
         if len(parts) != 3:
             print(f"错误：版本号格式不正确: {current_version}")
             return current_version
-        
+
         major, minor, patch = map(int, parts)
-        
+
         if update_type == "MAJOR":
             major += 1
             minor = 0
@@ -187,30 +182,32 @@ def increment_version(current_version, update_type):
             patch = 0
         elif update_type == "PATCH":
             patch += 1
-        
+
         return f"{major}.{minor}.{patch}"
-        
+
     except ValueError as e:
         print(f"错误：解析版本号失败: {e}")
         return current_version
+
 
 def update_setup_py_version(new_version):
     """更新setup.py中的版本号"""
     setup_path = Path("setup.py")
     content = setup_path.read_text(encoding="utf-8")
-    
+
     # 替换版本号
     new_content = re.sub(
         r'(version\s*=\s*["\'])([^"\']+)(["\'])',
         f'\\g<1>{new_version}\\g<3>',
         content
     )
-    
+
     if new_content != content:
         setup_path.write_text(new_content, encoding="utf-8")
         return True
-    
+
     return False
+
 
 def stage_setup_py():
     """将更新后的setup.py添加到暂存区"""
@@ -221,56 +218,59 @@ def stage_setup_py():
         print(f"添加setup.py到暂存区失败: {e}")
         return False
 
+
 def main():
     """主函数"""
     print("🔍 运行pre-commit hook...")
-    
+
     # 获取变更内容
     staged_files, staged_diff = get_staged_changes()
-    
+
     if not staged_files and not staged_diff:
         print("✅ 没有暂存的变更，跳过版本检查")
         sys.exit(0)
-    
+
     # 获取提交信息
     commit_msg = get_commit_message()
-    
+
     # 获取DeepSeek客户端
     try:
         client = get_deepseek_client()
     except SystemExit:
         print("⚠️  无法连接到DeepSeek API，跳过版本更新")
         sys.exit(0)
-    
+
     # 使用LLM分析变更
     print("🤖 使用AI分析变更内容...")
-    update_type = analyze_changes_with_llm(client, staged_files, staged_diff, commit_msg)
-    
+    update_type = analyze_changes_with_llm(
+        client, staged_files, staged_diff, commit_msg
+    )
+
     print(f"📊 分析结果：{update_type}")
-    
+
     if update_type == "NONE":
         print("✅ 无需更新版本号")
         sys.exit(0)
-    
+
     # 获取当前版本
     current_version = get_current_version()
     if not current_version:
         print("⚠️  无法获取当前版本，跳过版本更新")
         sys.exit(0)
-    
+
     # 计算新版本
     new_version = increment_version(current_version, update_type)
-    
+
     if new_version == current_version:
         print("✅ 版本号无需更改")
         sys.exit(0)
-    
+
     print(f"🔄 版本更新：{current_version} -> {new_version}")
-    
+
     # 更新setup.py
     if update_setup_py_version(new_version):
         print("✅ setup.py版本号已更新")
-        
+
         # 将更新后的setup.py添加到暂存区
         if stage_setup_py():
             print("✅ setup.py已添加到暂存区")
@@ -278,9 +278,10 @@ def main():
             print("⚠️  添加setup.py到暂存区失败")
     else:
         print("⚠️  更新setup.py失败")
-    
+
     print("🎉 Pre-commit hook执行完成")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
