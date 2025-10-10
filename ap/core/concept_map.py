@@ -14,11 +14,11 @@ import typer
 
 class ConceptMap:
     """多主题概念地图管理类"""
-    
+
     def __init__(self, file_path: Optional[str] = None):
         """
         初始化概念地图管理器
-        
+
         Args:
             file_path: 概念地图文件路径，默认为 workspace/concept_map.json
         """
@@ -26,29 +26,29 @@ class ConceptMap:
             file_path = Path("workspace") / "concept_map.json"
         self.file_path = Path(file_path)
         self.data = self._load_or_migrate()
-    
+
     def _load_or_migrate(self) -> Dict[str, Any]:
         """加载数据或执行迁移"""
         if not self.file_path.exists():
             return self._create_empty_structure()
-        
+
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             # 检查是否为旧格式
             if self._is_old_format(data):
                 typer.echo("检测到旧格式数据，正在自动迁移...")
                 data = self._migrate_from_old_format(data)
                 self._backup_old_data()
                 typer.echo("✅ 数据迁移完成")
-            
+
             return data
-            
+
         except (json.JSONDecodeError, IOError) as e:
             typer.echo(f"警告：无法读取概念地图文件 {self.file_path}: {e}", err=True)
             return self._create_empty_structure()
-    
+
     def _create_empty_structure(self) -> Dict[str, Any]:
         """创建空的多主题数据结构"""
         return {
@@ -59,24 +59,24 @@ class ConceptMap:
                 "active_topics": []
             }
         }
-    
+
     def _is_old_format(self, data: Dict[str, Any]) -> bool:
         """检测是否为旧格式数据"""
         # 新格式必须包含 topics 和 metadata
         if "topics" in data and "metadata" in data:
             return False
-    
+
         # 旧格式：直接包含概念数据，没有 topics 层级
         return any(
             isinstance(v, dict) and "name" in v for v in data.values()
         )
-    
+
     def _migrate_from_old_format(
         self, old_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """从旧格式迁移到新格式"""
         new_data = self._create_empty_structure()
-    
+
         # 将所有旧数据迁移到 "default" 主题下
         if old_data:
             new_data["topics"]["default"] = {
@@ -85,9 +85,9 @@ class ConceptMap:
                 "concepts": old_data
             }
             new_data["metadata"]["active_topics"] = ["default"]
-        
+
         return new_data
-    
+
     def _backup_old_data(self) -> None:
         """备份旧数据"""
         backup_path = self.file_path.with_suffix('.json.backup')
@@ -95,27 +95,27 @@ class ConceptMap:
             import shutil
             shutil.copy2(self.file_path, backup_path)
             typer.echo(f"📦 旧数据已备份到: {backup_path}")
-    
+
     def save(self) -> None:
         """保存概念地图到文件"""
         # 更新时间戳
         self.data["metadata"]["last_updated"] = datetime.now().isoformat()
-        
+
         # 确保目录存在
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             with open(self.file_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
         except IOError as e:
             typer.echo(f"错误：无法保存概念地图文件 {self.file_path}: {e}", err=True)
             raise typer.Exit(1)
-    
+
     # 主题管理方法
     def add_topic(self, topic_id: str, topic_name: str) -> None:
         """
         添加新主题
-        
+
         Args:
             topic_id: 主题ID（slugified）
             topic_name: 主题显示名称
@@ -126,51 +126,51 @@ class ConceptMap:
                 "created_at": datetime.now().isoformat(),
                 "concepts": {}
             }
-    
+
             # 更新活跃主题列表
             if topic_id not in self.data["metadata"]["active_topics"]:
                 self.data["metadata"]["active_topics"].append(topic_id)
-    
+
     def get_topic(self, topic_id: str) -> Optional[Dict[str, Any]]:
         """
         获取主题信息
-        
+
         Args:
             topic_id: 主题ID
-            
+
         Returns:
             主题数据字典，如果不存在返回 None
         """
         return self.data["topics"].get(topic_id)
-    
+
     def list_topics(self) -> List[str]:
         """
         列出所有主题ID
-        
+
         Returns:
             主题ID列表
         """
         return list(self.data["topics"].keys())
-    
+
     def topic_exists(self, topic_id: str) -> bool:
         """
         检查主题是否存在
-        
+
         Args:
             topic_id: 主题ID
-            
+
         Returns:
             是否存在
         """
         return topic_id in self.data["topics"]
-    
+
     def remove_topic(self, topic_id: str) -> bool:
         """
         删除主题
-        
+
         Args:
             topic_id: 主题ID
-            
+
         Returns:
             是否成功删除
         """
@@ -187,7 +187,7 @@ class ConceptMap:
     ) -> None:
         """
         添加概念到指定主题
-        
+
         Args:
             topic_id: 主题ID
             concept_id: 概念ID
@@ -203,11 +203,11 @@ class ConceptMap:
     ) -> Optional[Dict[str, Any]]:
         """
         获取指定概念
-        
+
         Args:
             topic_id: 主题ID
             concept_id: 概念ID
-            
+
         Returns:
             概念数据，如果不存在返回 None
         """
@@ -215,11 +215,11 @@ class ConceptMap:
         if topic:
             return topic["concepts"].get(concept_id)
         return None
-    
+
     def update_status(self, topic_id: str, concept_id: str, status_key: str, value: Any) -> None:
         """
         更新概念状态
-        
+
         Args:
             topic_id: 主题ID
             concept_id: 概念ID
@@ -237,7 +237,7 @@ class ConceptMap:
     ) -> None:
         """
         更新概念掌握程度
-        
+
         Args:
             topic_id: 主题ID
             concept_id: 概念ID
@@ -257,25 +257,25 @@ class ConceptMap:
     def get_default_topic_id(self) -> Optional[str]:
         """
         获取默认主题ID（用于单主题兼容）
-        
+
         Returns:
             默认主题ID，如果有多个主题则返回第一个
         """
         topics = self.list_topics()
         if not topics:
             return None
-        
+
         # 优先返回 "default" 主题
         if "default" in topics:
             return "default"
-        
+
         # 否则返回第一个主题
         return topics[0]
-    
+
     def get_all_concepts_flat(self) -> Dict[str, Any]:
         """
         获取所有概念的扁平化视图（用于向后兼容）
-        
+
         Returns:
             扁平化的概念字典
         """
@@ -303,16 +303,16 @@ class ConceptMap:
 def slugify(text: str) -> str:
     """
     将文本转换为适合作为文件名或ID的格式
-    
+
     Args:
         text: 要转换的文本
-        
+
     Returns:
         转换后的ID格式字符串
     """
     if not text:
         return ""
-    
+
     # 移除或替换特殊字符
     text = re.sub(r'[^\w\s-]', '', text.strip())
     # 将空格替换为连字符

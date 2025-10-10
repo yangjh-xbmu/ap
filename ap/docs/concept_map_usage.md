@@ -7,6 +7,7 @@ ConceptMap 类已重构为支持多主题数据结构，允许在单个概念地
 ## 核心特性
 
 - **多主题支持**: 在一个概念地图中管理多个学习主题
+- **智能主题推断**: 自动识别概念所属主题，无需手动指定
 - **自动数据迁移**: 从旧的单主题格式自动升级到新的多主题格式
 - **向后兼容**: 保持与现有代码的兼容性
 - **KISS 原则**: 简单直观的 API 设计
@@ -99,7 +100,29 @@ if default_topic_id:
     print(f"默认主题: {default_topic_id}")
 ```
 
-### 2. 扁平化概念视图（向后兼容）
+### 2. 智能主题推断
+
+```python
+# 根据概念 ID 自动查找所属主题
+concept_id = "variables-and-data-types"
+topic_id = concept_map.get_topic_by_concept(concept_id)
+
+if topic_id:
+    print(f"概念 '{concept_id}' 属于主题: {topic_id}")
+    # 可以直接获取概念数据
+    concept_data = concept_map.get_concept(topic_id, concept_id)
+else:
+    print(f"未找到概念 '{concept_id}' 所属的主题")
+
+# 实际应用场景：CLI 命令中的自动主题推断
+# 当用户执行 `ap e "变量与基本数据类型"` 时：
+# 1. 系统检测到概念名称中没有 '/' 分隔符
+# 2. 自动调用 get_topic_by_concept() 查找主题
+# 3. 找到概念属于 "python核心语法" 主题
+# 4. 自动保存到正确的主题目录下
+```
+
+### 3. 扁平化概念视图（向后兼容）
 
 ```python
 # 获取所有概念的扁平化视图（用于向后兼容）
@@ -108,7 +131,7 @@ for concept_id, concept_data in all_concepts.items():
     print(f"{concept_id}: {concept_data['name']}")
 ```
 
-### 3. 批量操作
+### 4. 批量操作
 
 ```python
 # 批量添加概念
@@ -243,3 +266,43 @@ except Exception as e:
 - 核心 API（如 `update_status`, `update_mastery`）保持不变
 
 这确保了现有的代码可以继续工作，同时逐步迁移到多主题架构。
+
+## CLI 命令中的智能主题推断
+
+### 概念解释命令 (`ap e`)
+
+智能主题推断让用户无需手动指定主题，系统会自动识别概念所属的主题：
+
+```bash
+# 传统方式：需要指定完整路径
+ap e "python核心语法/变量与基本数据类型"
+
+# 智能推断：只需概念名称
+ap e "变量与基本数据类型"
+# 系统自动：
+# 1. 检测概念名称中没有 '/' 分隔符
+# 2. 在概念地图中查找该概念
+# 3. 找到概念属于 "python核心语法" 主题
+# 4. 保存到 workspace/python核心语法/explanation/变量与基本数据类型.md
+```
+
+### 测验生成命令 (`ap g`)
+
+同样支持智能主题推断：
+
+```bash
+# 智能推断概念所属主题
+ap g "变量与基本数据类型" --num-questions 5
+
+# 系统自动保存到正确的主题目录
+# workspace/python核心语法/quizzes/变量与基本数据类型.yml
+```
+
+### 工作原理
+
+1. **输入解析**: 检查概念名称是否包含 `/` 分隔符
+2. **主题查找**: 如果没有分隔符，调用 `get_topic_by_concept()` 方法
+3. **路径构建**: 使用找到的主题构建正确的文件保存路径
+4. **优雅降级**: 如果找不到主题，使用默认主题或提示用户
+
+这个特性大大简化了用户体验，让学习过程更加流畅！

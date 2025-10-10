@@ -4,10 +4,11 @@ import re
 import typer
 
 from ap.core.concept_map import ConceptMap, slugify
-from ap.core.utils import get_deepseek_client
+from ap.core.utils import call_deepseek_api
 
 
-def create_concept_map_prompt(topic: str, existing_concepts: list = None) -> str:
+def create_concept_map_prompt(topic: str,
+                              existing_concepts: list = None) -> str:
     """创建用于生成学习地图的提示词"""
     return f"""请将以下主题拆解为结构化的学习路径。返回一个JSON格式的概念地图，包含主概念和所有子概念。
 
@@ -47,31 +48,16 @@ def generate_map(topic: str, model: str = "deepseek-chat"):
     typer.echo(f"🗺️  正在为主题 '{topic}' 生成学习地图...")
 
     try:
-        # 获取 DeepSeek 客户端
-        client = get_deepseek_client()
-
-        # 创建提示词
-        prompt = create_map_prompt(topic)
-
-        # 调用 API
-        response = client.chat.completions.create(
+        # 使用抽象的DeepSeek调用函数
+        content = call_deepseek_api(
+            messages=create_concept_map_prompt(topic),
             model="deepseek-coder",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that generates concept maps."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            system_message=(
+                "You are a helpful assistant that generates concept maps."
+            ),
             max_tokens=4096,
             temperature=0.7
         )
-
-        # 解析响应
-        content = response.choices[0].message.content.strip()
 
         # 尝试解析JSON
         try:
