@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AP CLI - 命令行学习工具安装配置
+AP CLI - 学习工具安装配置
 """
 
 from setuptools import setup, find_packages
@@ -14,7 +14,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="ap-cli",
-    version="1.8.0",
+    version="1.8.1",
     author="yangjh",
     author_email="yangjh@xbmu.edu.cn",
     description="一个帮助用户通过提问-生成-测验循环来学习新概念的命令行工具",
