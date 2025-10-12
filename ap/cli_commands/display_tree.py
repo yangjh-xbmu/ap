@@ -1,265 +1,183 @@
-from typing import Optional
-
+"""
+ap t
+"""
 import typer
+from rich.console import Console
+from rich.tree import Tree
 
-from ap.core.concept_map import ConceptMap, slugify
+from ap.core.concept_map import ConceptMap
 
-
-def display_tree(topic: Optional[str] = typer.Argument(None, help="主题名称（可选）")):
-    """显示学习进度树状图"""
-    try:
-        # 使用多主题ConceptMap
-        concept_map = ConceptMap()
-
-        if topic is None:
-            # 显示全局概览
-            display_global_overview(concept_map)
-        else:
-            # 显示单主题详情
-            topic_id = slugify(topic)
-
-            # 检查主题是否存在
-            if not concept_map.topic_exists(topic_id):
-                typer.echo(f"❌ 主题 '{topic}' 不存在")
-                suggest_available_topics(concept_map)
-                raise typer.Exit(1)
-
-            display_topic_details(concept_map, topic_id)
-
-    except typer.Exit:
-        raise
-    except Exception as e:
-        typer.echo(f"❌ 显示失败: {str(e)}")
-        raise typer.Exit(1)
+console = Console()
 
 
-def display_global_overview(concept_map):
-    """显示全局概览"""
-    typer.echo("📊 学习进度概览")
-    typer.echo("=" * 50)
+def display_tree(topic_name: str = typer.Argument(None, help="要显示的主题名称")):
+    """
+    以树状结构显示学习进度
+    """
+    concept_map = ConceptMap()
+    if topic_name:
+        if not concept_map.topic_exists(topic_name):
+            typer.echo(f"主题 '{topic_name}' 不存在。")
+            suggest_available_topics(concept_map)
+            raise typer.Exit(1)
+        display_topic_details(concept_map, topic_name)
+    else:
+        display_global_overview(concept_map)
 
-    topics = concept_map.list_topics()
-    if not topics:
-        typer.echo("暂无学习主题，请使用 'ap m <主题名称>' 创建学习地图")
+
+def display_global_overview(concept_map: ConceptMap):
+    """显示所有主题的全局概览"""
+    if not concept_map.data["topics"]:
+        typer.echo("还没有任何学习主题。")
         return
 
-    for topic_id in topics:
-        try:
-            topic_data = concept_map.get_topic(topic_id)
-            if topic_data:
-                concepts = topic_data.get('concepts', {})
+    tree = Tree("📚 [bold cyan]学习主题总览[/bold cyan]")
 
-                if not concepts and 'children' in topic_data:
-                    all_data = concept_map.data
-                    concepts = {}
-                    for child_id in topic_data.get('children', []):
-                        for key, value in all_data.items():
-                            if (key != 'topics' and key != 'metadata' and
-                                    isinstance(value, dict)):
-                                if key == child_id:
-                                    concepts[child_id] = value
+    for topic_id, topic_data in concept_map.data["topics"].items():
+        topic_name = topic_data.get("name", topic_id)
+        
+        # 计算主题的统计信息
+        concepts = topic_data.get("concepts", {})
+        total_concepts = len(concepts)
+        completed_concepts = sum(1 for c in concepts.values() if c.get("status", {}).get("completed"))
+        
+        completion_rate = (completed_concepts / total_concepts * 100) if total_concepts > 0 else 0
+        
+        topic_branch = tree.add(f"🌳 [bold]{topic_name}[/bold] (完成度: {completion_rate:.1f}%)")
 
-                stats = calculate_topic_stats_direct(concepts)
-                progress_bar = create_progress_bar(stats['progress_percent'])
+        modules = topic_data.get("modules", {})
+        if modules:
+            for module_id, module_data in modules.items():
+                module_name = module_data.get("name", module_id)
+                module_branch = topic_branch.add(f"📦 {module_name}")
+                
+                module_concepts = module_data.get("concepts", {})
+                for concept_id, concept_data in module_concepts.items():
+                    icon = get_status_icon_from_concept(concept_data)
+                    concept_name = concept_data.get("name", concept_id)
+                    mastery_score = concept_data.get("mastery", {}).get("best_score_percent", 0)
+                    if mastery_score == -1:
+                        module_branch.add(f"{icon} {concept_name}")
+                    else:
+                        module_branch.add(f"{icon} {concept_name} (掌握度: {mastery_score:.1f}%)")
+        
+        # 处理没有模块的孤立概念
+        topic_concepts = {k: v for k, v in concepts.items() if not v.get("module_id")}
+        if topic_concepts:
+            isolated_branch = topic_branch.add("📚 [bold]独立概念[/bold]")
+            for concept_id, concept_data in topic_concepts.items():
+                icon = get_status_icon_from_concept(concept_data)
+                concept_name = concept_data.get("name", concept_id)
+                mastery_score = concept_data.get("mastery", {}).get("best_score_percent", 0)
+                if mastery_score == -1:
+                    isolated_branch.add(f"{icon} {concept_name}")
+                else:
+                    isolated_branch.add(f"{icon} {concept_name} (掌握度: {mastery_score:.1f}%)")
 
-                topic_name = topic_data.get('name', topic_id)
-                if isinstance(topic_name, dict):
-                    topic_name = topic_name.get('name', topic_id)
-
-                typer.echo(f"📖 {topic_name}")
-                typer.echo(
-                    f"   进度: {progress_bar} {stats['progress_percent']:.1f}%"
-                )
-                typer.echo(
-                    f"   概念: {stats['completed_count']}/"
-                    f"{stats['total_count']} 已完成"
-                )
-                typer.echo(f"   掌握度: {stats['avg_mastery']:.1f}%")
-                typer.echo()
-        except Exception as e:
-            typer.echo(f"❌ 获取主题 '{topic_id}' 信息失败: {str(e)}")
-
-    typer.echo("\n💡 使用 'ap t <主题ID>' 查看特定主题的详细信息")
-
-
-def calculate_topic_stats_direct(concepts: dict) -> dict:
-    """直接计算概念统计信息，不依赖topic_data结构"""
-    total_count = count_all_concepts(concepts)
-    completed_count = count_completed_concepts(concepts)
-    total_mastery = sum_all_mastery(concepts)
-
-    if total_count > 0:
-        progress_percent = (completed_count / total_count) * 100
-        avg_mastery = total_mastery / total_count
-    else:
-        progress_percent = 0
-        avg_mastery = 0
-
-    return {
-        'total_count': total_count,
-        'completed_count': completed_count,
-        'progress_percent': progress_percent,
-        'avg_mastery': avg_mastery
-    }
+    console.print(tree)
 
 
-def display_topic_details(concept_map, topic_id):
-    """显示单主题详情"""
+def display_topic_details(concept_map: ConceptMap, topic_id: str):
+    """显示单个主题的详细信息"""
     topic_data = concept_map.get_topic(topic_id)
     if not topic_data:
-        typer.echo(f"❌ 主题 '{topic_id}' 不存在")
+        typer.echo(f"主题 '{topic_id}' 不存在。")
         return
 
-    topic_name = topic_data.get('name', topic_id)
-    if isinstance(topic_name, dict):
-        topic_name = topic_name.get('name', topic_id)
+    topic_name = topic_data.get("name", topic_id)
+    
+    # 计算统计信息
+    concepts = topic_data.get("concepts", {})
+    total_concepts = len(concepts)
+    completed_concepts = sum(1 for c in concepts.values() if c.get("status", {}).get("completed"))
+    
+    completion_rate = (completed_concepts / total_concepts * 100) if total_concepts > 0 else 0
+    
+    avg_mastery = (
+        sum(c.get("mastery", {}).get("best_score_percent", 0) for c in concepts.values()) / total_concepts
+        if total_concepts > 0
+        else 0
+    )
 
-    typer.echo(f"📖 {topic_name}")
-    typer.echo("=" * 50)
+    tree = Tree(f"🗺️ [bold cyan]主题: {topic_name}[/bold cyan]")
+    topic_branch = tree
 
-    concepts = topic_data.get('concepts', {})
+    # 统计信息后移到末端以提升可读性（稍后添加）
 
-    if concepts:
-        display_concept_tree(concepts)
+    modules = topic_data.get("modules", {})
+    all_concepts_flat = topic_data.get("concepts", {})
+    concepts_in_modules = set()
+
+    if modules:
+        for module_id, module_data in modules.items():
+            module_name = module_data.get("name", module_id)
+            module_branch = topic_branch.add(f"📦 [bold]{module_name}[/bold]")
+            
+            module_concepts = module_data.get("concepts", {})
+            
+            if not module_concepts:
+                module_branch.add("[italic]该模块下暂无概念[/italic]")
+            else:
+                for concept_id, concept_data in module_concepts.items():
+                    icon = get_status_icon_from_concept(concept_data)
+                    concept_name = concept_data.get("name", concept_id)
+                    mastery_score = concept_data.get("mastery", {}).get("best_score_percent", 0)
+                    if mastery_score == -1:
+                        module_branch.add(f"{icon} {concept_name}")
+                    else:
+                        module_branch.add(f"{icon} {concept_name} (掌握度: {mastery_score:.1f}%)")
+                    concepts_in_modules.add(concept_id)
+
+    # 处理没有模块的孤立概念
+    isolated_concepts = {cid: cdata for cid, cdata in all_concepts_flat.items() if cid not in concepts_in_modules}
+    if isolated_concepts:
+        isolated_branch = topic_branch.add("📚 [bold]独立概念[/bold]")
+        for concept_id, concept_data in isolated_concepts.items():
+            icon = get_status_icon_from_concept(concept_data)
+            concept_name = concept_data.get("name", concept_id)
+            mastery_score = concept_data.get("mastery", {}).get("best_score_percent", 0)
+            if mastery_score == -1:
+                isolated_branch.add(f"{icon} {concept_name}")
+            else:
+                isolated_branch.add(f"{icon} {concept_name} (掌握度: {mastery_score:.1f}%)")
+
+    if not modules and not isolated_concepts:
+        topic_branch.add("[italic]该主题下没有任何模块或概念。[/italic]")
+    
+    console.print(tree)
+
+    # 以分行方式显示详细统计（取消树形结构）
+    mastery_values = [
+        c.get("mastery", {}).get("best_score_percent", -1)
+        for c in concepts.values()
+        if c.get("mastery", {}).get("best_score_percent", -1) != -1
+    ]
+    learned_count = len(mastery_values)
+    progress_percent = ((learned_count / total_concepts) * 100) if total_concepts > 0 else 0.0
+    typer.echo("\n详细统计：")
+    typer.echo(f"概念总数: {total_concepts}")
+    typer.echo(f"已学习数量: {learned_count}")
+    typer.echo(f"学习进度: {progress_percent:.1f}%")
+
+
+def get_status_icon_from_concept(concept: dict) -> str:
+    """根据概念的状态返回一个图标"""
+    status = concept.get("status", {})
+    if status.get("completed"):
+        return "✅"
+    if status.get("learned"):
+        return "📖"
+    if status.get("reviewed"):
+        return "👀"
+    return "📝"
+
+
+def suggest_available_topics(concept_map: ConceptMap):
+    """当用户输入的主题不存在时，给出可用主题的建议"""
+    available_topics = concept_map.list_topics()
+    if available_topics:
+        typer.echo("可用的主题有:")
+        for topic in available_topics:
+            typer.echo(f"- {topic}")
     else:
-        typer.echo("暂无概念数据")
-
-    stats = calculate_topic_stats_direct(concepts)
-    typer.echo("\n📊 学习统计:")
-    typer.echo(f"   总概念数: {stats['total_count']}")
-    typer.echo(f"   已完成: {stats['completed_count']}")
-    typer.echo(f"   完成率: {stats['progress_percent']:.1f}%")
-    typer.echo(f"   平均掌握度: {stats['avg_mastery']:.1f}%")
-
-
-def suggest_available_topics(concept_map):
-    """建议可用主题"""
-    topics = concept_map.list_topics()
-    if topics:
-        topic_list = ', '.join(topics)
-        typer.echo(f"可用主题: {topic_list}")
-    else:
-        typer.echo("暂无可用主题，请使用 'ap m <主题名称>' 创建学习地图")
-
-
-def get_status_icon(status: dict, mastery: dict) -> str:
-    """根据学习状态和掌握程度返回对应的状态图标"""
-    if not status.get('explained', False):
-        return "⚪"  # 未开始
-    elif status.get('quiz_taken', False):
-        score = mastery.get('best_score_percent', -1)
-        if score >= 80:
-            return "🟢"  # 已掌握
-        elif score >= 60:
-            return "🟡"  # 学习中
-        else:
-            return "🔴"  # 需复习
-    elif status.get('quiz_generated', False):
-        return "🟡"  # 学习中
-    else:
-        return "🟡"  # 学习中
-
-
-def create_progress_bar(percentage: float, width: int = 20) -> str:
-    """创建进度条"""
-    filled = int(width * percentage / 100)
-    bar = "█" * filled + "░" * (width - filled)
-    return f"[{bar}]"
-
-
-def count_all_concepts(concepts: dict) -> int:
-    """递归计算所有概念数量"""
-    count = 0
-    for concept_data in concepts.values():
-        count += 1
-        if concept_data.get('children'):
-            count += count_all_concepts(concept_data['children'])
-    return count
-
-
-def count_completed_concepts(concepts: dict) -> int:
-    """递归计算已完成概念数量"""
-    count = 0
-    for concept_data in concepts.values():
-        status = concept_data.get('status', {})
-        if status.get('quiz_taken', False):
-            count += 1
-        if concept_data.get('children'):
-            count += count_completed_concepts(concept_data['children'])
-    return count
-
-
-def sum_all_mastery(concepts: dict) -> float:
-    """递归计算所有概念的掌握度总和"""
-    total = 0.0
-    for concept_data in concepts.values():
-        mastery = concept_data.get('mastery', {})
-        score = mastery.get('best_score_percent', 0)
-        if score > 0:
-            total += score
-        if concept_data.get('children'):
-            total += sum_all_mastery(concept_data['children'])
-    return total
-
-
-def calculate_topic_stats(topic_data: dict) -> dict:
-    """计算主题统计信息"""
-    concepts = topic_data.get('concepts', {})
-
-    if not concepts and 'children' in topic_data:
-        concept_map = ConceptMap()
-        all_data = concept_map.data
-
-        if 'topics' in all_data and 'default' in all_data['topics']:
-            concepts = all_data['topics']['default'].get('concepts', {})
-        else:
-            concepts = {}
-            for child_id in topic_data.get('children', []):
-                if child_id in all_data:
-                    concepts[child_id] = all_data[child_id]
-
-    total_count = count_all_concepts(concepts)
-    completed_count = count_completed_concepts(concepts)
-    total_mastery = sum_all_mastery(concepts)
-
-    if total_count > 0:
-        progress_percent = (completed_count / total_count) * 100
-        avg_mastery = total_mastery / total_count
-    else:
-        progress_percent = 0
-        avg_mastery = 0
-
-    return {
-        'total_count': total_count,
-        'completed_count': completed_count,
-        'progress_percent': progress_percent,
-        'avg_mastery': avg_mastery
-    }
-
-
-def display_concept_tree(concepts: dict, level: int = 0, prefix: str = "") -> None:
-    """递归显示概念树"""
-    concept_items = list(concepts.items())
-    for i, (concept_id, concept_data) in enumerate(concept_items):
-        is_last = i == len(concept_items) - 1
-        current_prefix = "└── " if is_last else "├── "
-        next_prefix = "    " if is_last else "│   "
-
-        status = concept_data.get('status', {})
-        mastery = concept_data.get('mastery', {})
-        status_icon = get_status_icon(status, mastery)
-
-        score = mastery.get('best_score_percent', -1)
-        mastery_text = f" ({score:.0f}%)" if score >= 0 else ""
-
-        typer.echo(
-            f"{prefix}{current_prefix}{status_icon} "
-            f"{concept_data.get('name', concept_id)}{mastery_text}"
-        )
-
-        if concept_data.get('children'):
-            display_concept_tree(
-                concept_data['children'],
-                level + 1,
-                prefix + next_prefix
-            )
+        typer.echo("当前没有可用的主题。")

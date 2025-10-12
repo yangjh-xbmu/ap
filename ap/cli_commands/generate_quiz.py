@@ -440,22 +440,33 @@ def create_quiz_prompt(concept: str, explanation_content: str,
 
 def generate_quiz_internal(
     concept: str,
-    num_questions: int = None,
-    mode: str = "auto",
-    max_tokens: int = 8192,  # chat模型默认4K，最大8K
-    use_parallel: bool = True
+    **kwargs
 ):
     """
-    内部调用版本的生成测验函数，支持并行生成优化
+    基于解释文档生成测验题目（内部函数）
 
     Args:
         concept: 要生成测验的概念名称
-        num_questions: 指定题目数量（默认为智能分析）
-        mode: 生成模式：auto（智能分析）或 fixed（固定模式）
-        max_tokens: 最大输出长度（默认8K，chat模型最大8K）
-        use_parallel: 是否使用并行生成（默认True，显著提升速度）
+        **kwargs: 配置参数
+            - num_questions: int = None, 指定题目数量（默认为智能分析）
+            - mode: str = "auto", 生成模式：auto（智能分析）或 fixed（固定模式）
+            - max_tokens: int = 8192, 最大输出长度
+            - use_parallel: bool = True, 是否使用并行生成
+            - verbose: bool = False, 是否显示详细输出
     """
+    # 提取参数，设置默认值
+    num_questions = kwargs.get('num_questions', None)
+    mode = kwargs.get('mode', "auto")
+    max_tokens = kwargs.get('max_tokens', 8192)
+    use_parallel = kwargs.get('use_parallel', True)
+    verbose = kwargs.get('verbose', False)
+    
+    if verbose:
+        print(f"[GENERATE_QUIZ] 开始生成测验题目: {concept}")
+        print(f"[GENERATE_QUIZ] 参数: num_questions={num_questions}, mode={mode}, use_parallel={use_parallel}")
     try:
+        if verbose:
+            print(f"[GENERATE_QUIZ] 创建概念地图实例")
         # 创建概念地图实例
         concept_map = ConceptMap()
 

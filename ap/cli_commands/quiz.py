@@ -5,13 +5,22 @@ from ap.core.concept_map import ConceptMap, slugify
 from ap.core.settings import WORKSPACE_DIR
 
 
-def quiz(concept: str):
+def quiz(concept: str, **kwargs):
     """
     开始交互式测验
 
     Args:
         concept: 要进行测验的概念名称
+        **kwargs: 额外配置参数
+            - verbose: bool = False, 是否显示详细输出
+            - auto_mode: bool = False, 是否自动模式（跳过交互）
     """
+    verbose = kwargs.get('verbose', False)
+    auto_mode = kwargs.get('auto_mode', False)
+    
+    if verbose:
+        print(f"[QUIZ] 开始交互式测验: {concept}")
+    
     try:
         # 创建概念地图实例
         concept_map = ConceptMap()
