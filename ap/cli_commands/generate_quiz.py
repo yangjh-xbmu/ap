@@ -1,9 +1,18 @@
 import yaml
 import typer
+import asyncio
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
 from ap.core.concept_map import ConceptMap, slugify
 from ap.core.utils import call_deepseek_with_retry
 from ap.core.settings import WORKSPACE_DIR
 from ap.cli_commands.explain import analyze_document_structure
+
+# 导入并行生成器
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from parallel_quiz_generator import ParallelQuizGenerator
 
 
 def create_quiz_prompt(concept: str, explanation_content: str,
@@ -64,16 +73,18 @@ def generate_quiz_internal(
     concept: str,
     num_questions: int = None,
     mode: str = "auto",
-    max_tokens: int = 32768
+    max_tokens: int = 8192,  # chat模型默认4K，最大8K
+    use_parallel: bool = True
 ):
     """
-    内部调用版本的生成测验函数，避免typer.Option序列化问题
+    内部调用版本的生成测验函数，支持并行生成优化
 
     Args:
         concept: 要生成测验的概念名称
         num_questions: 指定题目数量（默认为智能分析）
         mode: 生成模式：auto（智能分析）或 fixed（固定模式）
-        max_tokens: 最大输出长度（默认32K，最大64K）
+        max_tokens: 最大输出长度（默认8K，chat模型最大8K）
+        use_parallel: 是否使用并行生成（默认True，显著提升速度）
     """
     try:
         # 创建概念地图实例
@@ -124,19 +135,52 @@ def generate_quiz_internal(
         # 构造输出文件路径
         quiz_file = quizzes_dir / f"{concept_slug}.yml"
 
-        # 使用抽象的DeepSeek调用函数（推理模式）
-        quiz_content = call_deepseek_with_retry(
-            messages=create_quiz_prompt(
-                concept, explanation_content, num_questions
-            ),
-            model="deepseek-reasoner",
-            max_tokens=max_tokens,
-            max_retries=3,
-            base_temperature=0.5
-        )
+        # 选择生成策略
+        if use_parallel and num_questions >= 5:
+            print(f"🚀 使用并行生成策略 (并发数上限: 6)")
+            
+            # 使用并行生成器
+            async def run_parallel_generation():
+                generator = ParallelQuizGenerator()
+                # 设置并发数上限为6
+                generator.max_concurrent = 6
+                generator.semaphore = asyncio.Semaphore(6)
+                
+                result = await generator.generate_parallel_quiz(
+                    concept_name=concept,
+                    content=explanation_content,
+                    target_questions=num_questions
+                )
+                return result
+            
+            # 运行异步生成
+            result = asyncio.run(run_parallel_generation())
+            quiz_data = result["questions"]
+            
+            # 显示性能统计
+            stats = result["generation_stats"]
+            print(f"⚡ 并行生成完成:")
+            print(f"   总耗时: {stats['total_time']:.1f}秒")
+            print(f"   生成题目: {stats['actual_questions']}/{stats['target_questions']}")
+            print(f"   并行效率: {stats['parallel_efficiency']:.1%}")
+            print(f"   成功块数: {stats['successful_chunks']}/{stats['chunks_processed']}")
+            
+        else:
+            print(f"🐌 使用传统单线程生成 (题目数较少或禁用并行)")
+            
+            # 使用原有的单线程生成逻辑
+            quiz_content = call_deepseek_with_retry(
+                messages=create_quiz_prompt(
+                    concept, explanation_content, num_questions
+                ),
+                model="deepseek-chat",
+                max_tokens=max_tokens,
+                max_retries=3,
+                base_temperature=0.5
+            )
 
-        # 尝试解析YAML
-        quiz_data = yaml.safe_load(quiz_content)
+            # 尝试解析YAML
+            quiz_data = yaml.safe_load(quiz_content)
 
         # 验证数据结构
         if not isinstance(quiz_data, list):
@@ -190,10 +234,18 @@ def generate_quiz_internal(
 
             if "error" not in analysis_result:
                 quality_score = analysis_result.get('quality_score', 0)
+                
+                print(f"🎯 答案分布质量检查:")
+                distribution = analysis_result.get('distribution', {})
+                for option, count in distribution.items():
+                    percentage = (count / len(quiz_data)) * 100
+                    print(f"   选项 {option}: {count} 题 ({percentage:.1f}%)")
+                print(f"   质量分数: {quality_score:.1f}/100")
 
                 # 如果质量分数低于80，进行静默答案随机化
                 if quality_score < 80:
-                    shuffled_quiz, _ = quality_checker.shuffle_quiz_answers(
+                    print(f"🔄 质量分数偏低，正在优化答案分布...")
+                    shuffled_quiz, shuffle_info = quality_checker.shuffle_quiz_answers(
                         quiz_data
                     )
 
@@ -205,9 +257,9 @@ def generate_quiz_internal(
                     # 使用随机化后的数据
                     quiz_data = shuffled_quiz
                     analysis_result = new_analysis
-
-                # 记录到质量监控系统已被移除
-                # 质量检查和改进功能保留，但不再记录监控数据
+                    
+                    new_quality_score = new_analysis.get('quality_score', 0)
+                    print(f"✅ 答案分布优化完成，新质量分数: {new_quality_score:.1f}/100")
 
             # 将处理后的数据转换回YAML格式
             quiz_content = yaml.dump(
@@ -215,8 +267,13 @@ def generate_quiz_internal(
                 allow_unicode=True, sort_keys=False
             )
 
-        except Exception:
-            pass  # 静默处理质量检查错误
+        except Exception as e:
+            print(f"⚠️  质量检查过程中出现问题: {e}")
+            # 静默处理质量检查错误，使用原始数据
+            quiz_content = yaml.dump(
+                quiz_data, default_flow_style=False,
+                allow_unicode=True, sort_keys=False
+            )
 
         # 保存到文件
         with open(quiz_file, 'w', encoding='utf-8') as f:
@@ -245,11 +302,11 @@ def generate_quiz(
         help="生成模式：auto（智能分析）或 fixed（固定模式）"
     ),
     max_tokens: int = typer.Option(
-        32768,
+        8192,  # chat模型默认4K，最大8K
         "--max-tokens",
-        help="最大输出长度（默认32K，最大64K）",
+        help="最大输出长度（默认8K，chat模型最大8K）",
         min=1000,
-        max=65536
+        max=8192
     )
 ):
     """
@@ -259,7 +316,7 @@ def generate_quiz(
         concept: 要生成测验的概念名称
         num_questions: 题目数量（可选，默认智能分析）
         mode: 生成模式 (auto/fixed，默认auto)
-        max_tokens: 最大输出长度（默认32K，最大64K）
+        max_tokens: 最大输出长度（默认8K，chat模型最大8K）
     """
     # 调用内部版本，避免typer.Option序列化问题
     return generate_quiz_internal(
