@@ -2,17 +2,386 @@ import yaml
 import typer
 import asyncio
 import os
-from openai import OpenAI
-from dotenv import load_dotenv
+import re
+import time
+import random
+from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 from ap.core.concept_map import ConceptMap, slugify
 from ap.core.utils import call_deepseek_with_retry
 from ap.core.settings import WORKSPACE_DIR
 from ap.cli_commands.explain import analyze_document_structure
 
-# 导入并行生成器
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from parallel_quiz_generator import ParallelQuizGenerator
+
+@dataclass
+class ContentChunk:
+    """内容块"""
+    title: str
+    content: str
+    target_questions: int
+    chunk_id: int
+
+
+@dataclass
+class GenerationResult:
+    """生成结果"""
+    chunk_id: int
+    questions: List[Dict[str, Any]]
+    generation_time: float
+    error: str = None
+
+
+class ParallelQuizGenerator:
+    """并行测试题生成器"""
+    
+    def __init__(self, max_concurrent: int = 6):
+        """
+        初始化生成器
+        
+        Args:
+            max_concurrent: 最大并发数，默认为6
+        """
+        self.max_concurrent = max_concurrent
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+
+    def extract_keywords(self, text: str) -> set:
+        """
+        从题目文本中提取关键词
+        
+        Args:
+            text: 题目文本
+            
+        Returns:
+            关键词集合
+        """
+        # 移除标点符号，转换为小写
+        cleaned_text = re.sub(r'[^\w\s]', '', text.lower())
+        # 分词并过滤短词
+        words = [word for word in cleaned_text.split() if len(word) > 1]
+        return set(words)
+
+    def calculate_similarity(self, question1: Dict[str, Any], question2: Dict[str, Any]) -> float:
+        """
+        计算两个题目的相似度（使用Jaccard相似度）
+        
+        Args:
+            question1: 第一个题目
+            question2: 第二个题目
+            
+        Returns:
+            相似度分数 (0-1)
+        """
+        text1 = question1.get('question', '')
+        text2 = question2.get('question', '')
+        
+        keywords1 = self.extract_keywords(text1)
+        keywords2 = self.extract_keywords(text2)
+        
+        if not keywords1 and not keywords2:
+            return 0.0
+        
+        intersection = keywords1.intersection(keywords2)
+        union = keywords1.union(keywords2)
+        
+        return len(intersection) / len(union) if union else 0.0
+
+    def remove_duplicate_questions(self, questions: List[Dict[str, Any]], 
+                                 similarity_threshold: float = 0.6) -> List[Dict[str, Any]]:
+        """
+        移除重复的题目
+        
+        Args:
+            questions: 题目列表
+            similarity_threshold: 相似度阈值，超过此值认为是重复题目
+            
+        Returns:
+            去重后的题目列表
+        """
+        if not questions:
+            return []
+        
+        unique_questions = []
+        
+        for current_question in questions:
+            is_duplicate = False
+            
+            for existing_question in unique_questions:
+                similarity = self.calculate_similarity(current_question, existing_question)
+                if similarity > similarity_threshold:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_questions.append(current_question)
+        
+        return unique_questions
+
+    def create_chunk_prompt(self, chunk: ContentChunk, concept_name: str) -> str:
+        """为内容块创建生成提示"""
+        return f"""基于以下内容，为概念 "{concept_name}" 的 "{chunk.title}" 部分生成 {chunk.target_questions} 道高质量的选择题。
+
+内容：
+{chunk.content}
+
+要求：
+1. 题目应覆盖这部分内容的关键知识点
+2. 每道题有4个选项（A、B、C、D）
+3. 只有一个正确答案
+4. 选项分布要相对均匀
+5. 题目难度适中，适合初学者
+6. 使用中文
+
+请严格按照以下YAML格式输出，不要包含任何代码块标记：
+
+- question: "题目内容"
+  options:
+    A: "选项A内容"
+    B: "选项B内容"
+    C: "选项C内容"
+    D: "选项D内容"
+  answer: "A"
+  explanation: "答案解释内容"
+
+生成 {chunk.target_questions} 道题目："""
+
+    async def generate_chunk_questions(self, chunk: ContentChunk, concept_name: str) -> GenerationResult:
+        """为单个内容块生成题目"""
+        async with self.semaphore:  # 控制并发数
+            start_time = time.time()
+            
+            try:
+                prompt = self.create_chunk_prompt(chunk, concept_name)
+                
+                # 使用项目统一的API调用函数
+                def retry_callback(attempt, max_retries):
+                    print(f"   块 {chunk.chunk_id}: 第 {attempt}/{max_retries} 次尝试...")
+                
+                # 将同步调用包装在异步执行中
+                content = await asyncio.to_thread(
+                    call_deepseek_with_retry,
+                    messages=prompt,
+                    model="deepseek-chat",
+                    max_retries=3,
+                    base_temperature=0.3,
+                    max_tokens=4096,
+                    retry_callback=retry_callback
+                )
+                
+                # 解析YAML
+                questions = yaml.safe_load(content)
+                
+                # 验证格式
+                if not isinstance(questions, list):
+                    raise ValueError(f"块 {chunk.chunk_id} 生成的内容不是列表格式")
+                
+                # 验证每个题目
+                for i, q in enumerate(questions):
+                    if not all(key in q for key in ['question', 'options', 'answer', 'explanation']):
+                        raise ValueError(f"块 {chunk.chunk_id} 第 {i+1} 题格式不完整")
+                
+                generation_time = time.time() - start_time
+                
+                return GenerationResult(
+                    chunk_id=chunk.chunk_id,
+                    questions=questions,
+                    generation_time=generation_time
+                )
+                
+            except Exception as e:
+                generation_time = time.time() - start_time
+                return GenerationResult(
+                    chunk_id=chunk.chunk_id,
+                    questions=[],
+                    generation_time=generation_time,
+                    error=str(e)
+                )
+
+    def merge_and_optimize_results(self, results: List[GenerationResult]) -> List[Dict[str, Any]]:
+        """合并结果并优化答案分布"""
+        all_questions = []
+        
+        # 合并所有成功生成的题目
+        for result in results:
+            if result.error is None:
+                all_questions.extend(result.questions)
+        
+        if not all_questions:
+            raise ValueError("没有成功生成任何题目")
+        
+        # 去重处理
+        all_questions = self.remove_duplicate_questions(all_questions)
+        
+        # 分析答案分布
+        answer_counts = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+        for q in all_questions:
+            answer = q.get('answer', '')
+            if answer in answer_counts:
+                answer_counts[answer] += 1
+        
+        # 如果分布不均匀，进行调整
+        total_questions = len(all_questions)
+        target_per_option = total_questions / 4
+        
+        # 找出需要调整的题目
+        adjustments_needed = {}
+        for option, count in answer_counts.items():
+            diff = count - target_per_option
+            if abs(diff) > 1:  # 允许1题的误差
+                adjustments_needed[option] = diff
+        
+        # 简单的答案重新分配（保持题目内容不变，只调整答案）
+        if adjustments_needed:
+            self._rebalance_answers(all_questions, adjustments_needed)
+        
+        return all_questions
+
+    def _rebalance_answers(self, questions: List[Dict[str, Any]], adjustments: Dict[str, float]):
+        """重新平衡答案分布"""
+        # 找出过多和过少的选项
+        excess_options = [opt for opt, diff in adjustments.items() if diff > 1]
+        deficit_options = [opt for opt, diff in adjustments.items() if diff < -1]
+        
+        if not excess_options or not deficit_options:
+            return
+        
+        # 简单策略：随机重新分配一些题目的答案
+        for i, question in enumerate(questions):
+            current_answer = question.get('answer', '')
+            
+            # 如果当前答案是过多的选项，考虑改为不足的选项
+            if current_answer in excess_options and deficit_options:
+                if random.random() < 0.3:  # 30%的概率进行调整
+                    new_answer = random.choice(deficit_options)
+                    
+                    # 交换选项内容
+                    options = question['options']
+                    if current_answer in options and new_answer in options:
+                        # 交换选项内容，使新答案成为正确答案
+                        options[current_answer], options[new_answer] = options[new_answer], options[current_answer]
+                        question['answer'] = new_answer
+
+    async def generate_parallel_quiz(self, concept_name: str, content: str, 
+                                   target_questions: int = 10) -> Dict[str, Any]:
+        """
+        并行生成测试题
+        
+        Args:
+            concept_name: 概念名称
+            content: 内容文本
+            target_questions: 目标题目数量
+            
+        Returns:
+            包含题目和统计信息的字典
+        """
+        print(f"🚀 开始并行生成 '{concept_name}' 的 {target_questions} 道测试题")
+        
+        start_time = time.time()
+        
+        # 根据题目数量决定分块策略
+        if target_questions <= 5:
+            # 少量题目，单块处理
+            chunks = [ContentChunk(
+                title="完整内容",
+                content=content,
+                target_questions=target_questions,
+                chunk_id=0
+            )]
+        elif target_questions <= 12:
+            # 中等数量，分为两块
+            chunk_size = target_questions // 2
+            remaining = target_questions % 2
+            
+            # 简单按内容长度分割
+            words = content.split()
+            mid_point = len(words) // 2
+            
+            chunks = [
+                ContentChunk(
+                    title="前半部分",
+                    content=" ".join(words[:mid_point]),
+                    target_questions=chunk_size + remaining,
+                    chunk_id=0
+                ),
+                ContentChunk(
+                    title="后半部分", 
+                    content=" ".join(words[mid_point:]),
+                    target_questions=chunk_size,
+                    chunk_id=1
+                )
+            ]
+        else:
+            # 大量题目，多块处理（每块最多5题）
+            max_questions_per_chunk = 5
+            num_chunks = (target_questions + max_questions_per_chunk - 1) // max_questions_per_chunk
+            
+            words = content.split()
+            chunk_size = len(words) // num_chunks
+            
+            chunks = []
+            for i in range(num_chunks):
+                start_idx = i * chunk_size
+                end_idx = start_idx + chunk_size if i < num_chunks - 1 else len(words)
+                
+                questions_for_chunk = min(max_questions_per_chunk, 
+                                        target_questions - len(chunks) * max_questions_per_chunk)
+                if i == num_chunks - 1:  # 最后一块包含剩余题目
+                    questions_for_chunk = target_questions - sum(c.target_questions for c in chunks)
+                
+                chunks.append(ContentChunk(
+                    title=f"第 {i+1} 部分",
+                    content=" ".join(words[start_idx:end_idx]),
+                    target_questions=questions_for_chunk,
+                    chunk_id=i
+                ))
+        
+        print(f"✂️  内容已切分为 {len(chunks)} 个块")
+        for chunk in chunks:
+            print(f"   块 {chunk.chunk_id + 1}: {chunk.title} ({chunk.target_questions} 题)")
+        
+        # 并行生成
+        print(f"⚡ 开始并行生成 (最大并发: {self.max_concurrent})...")
+        
+        tasks = [
+            self.generate_chunk_questions(chunk, concept_name) 
+            for chunk in chunks
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理异常结果
+        valid_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"❌ 块 {i} 生成失败: {result}")
+            else:
+                valid_results.append(result)
+                if result.error:
+                    print(f"❌ 块 {result.chunk_id} 生成失败: {result.error}")
+                else:
+                    print(f"✅ 块 {result.chunk_id} 生成成功: {len(result.questions)} 题 ({result.generation_time:.1f}s)")
+        
+        # 合并和优化
+        print("🔄 合并结果并优化答案分布...")
+        final_questions = self.merge_and_optimize_results(valid_results)
+        
+        total_time = time.time() - start_time
+        
+        # 生成报告
+        successful_chunks = len([r for r in valid_results if r.error is None])
+        avg_chunk_time = sum(r.generation_time for r in valid_results if r.error is None) / max(1, successful_chunks)
+        
+        return {
+            "questions": final_questions,
+            "generation_stats": {
+                "total_time": total_time,
+                "target_questions": target_questions,
+                "actual_questions": len(final_questions),
+                "chunks_processed": len(chunks),
+                "successful_chunks": successful_chunks,
+                "average_chunk_time": avg_chunk_time,
+                "parallel_efficiency": avg_chunk_time / total_time if total_time > 0 else 0
+            }
+        }
 
 
 def create_quiz_prompt(concept: str, explanation_content: str,
@@ -137,14 +506,11 @@ def generate_quiz_internal(
 
         # 选择生成策略
         if use_parallel and num_questions >= 5:
-            print(f"🚀 使用并行生成策略 (并发数上限: 6)")
+            print(f"🚀 使用并行生成策略")
             
             # 使用并行生成器
             async def run_parallel_generation():
-                generator = ParallelQuizGenerator()
-                # 设置并发数上限为6
-                generator.max_concurrent = 6
-                generator.semaphore = asyncio.Semaphore(6)
+                generator = ParallelQuizGenerator(max_concurrent=6)
                 
                 result = await generator.generate_parallel_quiz(
                     concept_name=concept,
