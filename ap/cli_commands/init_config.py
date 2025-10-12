@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import typer
+import getpass
 
 
 def init_config():
@@ -33,50 +34,12 @@ def init_config():
     # 交互式输入 API 密钥
     print("\n🔑 请输入您的 DeepSeek API 密钥:")
     print("💡 提示: 您可以在 https://platform.deepseek.com/api_keys 获取 API 密钥")
-    print("🔒 输入的密钥将以星号显示以保护安全")
+    print("🔒 输入的密钥将被隐藏以保护安全")
     
     while True:
         try:
-            # 自定义密钥输入，显示星号反馈
-            print("DEEPSEEK_API_KEY: ", end="", flush=True)
-            api_key = ""
-            
-            # 设置终端为原始模式以逐字符读取
-            import termios
-            import tty
-            
-            old_settings = termios.tcgetattr(sys.stdin)
-            try:
-                tty.setraw(sys.stdin.fileno())
-                
-                while True:
-                    char = sys.stdin.read(1)
-                    
-                    # 回车或换行结束输入
-                    if char in ['\r', '\n']:
-                        print()  # 换行
-                        break
-                    
-                    # 退格键处理
-                    elif char in ['\x7f', '\x08']:
-                        if api_key:
-                            api_key = api_key[:-1]
-                            print('\b \b', end="", flush=True)
-                    
-                    # Ctrl+C 中断
-                    elif char == '\x03':
-                        raise KeyboardInterrupt
-                    
-                    # 普通字符
-                    elif ord(char) >= 32:  # 可打印字符
-                        api_key += char
-                        print('*', end="", flush=True)
-                        
-            finally:
-                # 恢复终端设置
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-            
-            api_key = api_key.strip()
+            # 使用 getpass 进行安全的密码输入
+            api_key = getpass.getpass("DEEPSEEK_API_KEY: ")
             
             if not api_key:
                 print("❌ API 密钥不能为空，请重新输入")

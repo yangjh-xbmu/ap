@@ -19,17 +19,18 @@ def create_concept_map_prompt(topic: str,
 4. 概念名称要具体明确，避免过于宽泛
 5. 按学习的逻辑顺序排列子概念
 6. 严格按照以下JSON格式返回，不要包含任何额外的解释文字
+7. 尽量使用中文创建概念名称
 
 主题: {topic}
 
 返回格式示例：
 {{
-  "main_concept": "Python Core Syntax",
+  "main_concept": "Python核心概念",
   "children": [
-    "Variables and Data Types",
-    "Control Flow",
-    "Functions and Scope",
-    "Data Structures"
+    "变量和数据类型",
+    "控制流",
+    "函数和作用域",
+    "数据结构"
   ]
 }}"""
 

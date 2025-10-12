@@ -21,6 +21,10 @@ import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
 
+# 添加项目根目录到Python路径，以便导入ap模块
+project_root = Path(__file__).parent.parent if Path(__file__).parent.name == 'hooks' else Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
 from ap.core.utils import get_deepseek_client
 
 # 加载环境变量
