@@ -73,19 +73,19 @@ def analyze_document_structure(content: str) -> dict:
     }
 
 
-def explain(concept: str, **kwargs):
+def explain(
+    concept: str,
+    verbose: bool = False,
+    force_regenerate: bool = False
+):
     """
     生成概念的详细解释文档
 
     Args:
         concept: 要解释的概念名称
-        **kwargs: 额外配置参数
-            - verbose: bool = False, 是否显示详细输出
-            - force_regenerate: bool = False, 是否强制重新生成
+        verbose: bool = False, 是否显示详细输出
+        force_regenerate: bool = False, 是否强制重新生成
     """
-    verbose = kwargs.get('verbose', False)
-    force_regenerate = kwargs.get('force_regenerate', False)
-    
     if verbose:
         print(f"[EXPLAIN] 开始生成概念解释: {concept}")
     
