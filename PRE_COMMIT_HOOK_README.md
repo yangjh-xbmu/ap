@@ -34,10 +34,11 @@ chmod +x .git/hooks/pre-commit
 
 | 更新类型 | 版本变化 | 触发条件 | 示例 |
 |---------|---------|---------|------|
-| **MAJOR** | x.0.0 | 重大架构变更、破坏性API变更 | 1.0.0 → 2.0.0 |
-| **MINOR** | x.y.0 | 新增功能、新命令、重要改进 | 1.0.0 → 1.1.0 |
-| **PATCH** | x.y.z | Bug修复、小改进、性能优化 | 1.0.0 → 1.0.1 |
-| **NONE** | 不变 | 文档更新、注释、格式化 | 1.0.0 → 1.0.0 |
+| **MAJOR** | x.0.0.0 | 重大架构变更、破坏性API变更 | 1.0.0.0 → 2.0.0.0 |
+| **MINOR** | x.y.0.0 | 新增功能、新命令、重要改进 | 1.0.0.0 → 1.1.0.0 |
+| **PATCH** | x.y.z.0 | Bug修复、小改进、性能优化 | 1.0.0.0 → 1.0.1.0 |
+| **BUILD** | x.y.z.w | 文档更新、注释修改、格式化 | 1.0.0.0 → 1.0.0.1 |
+| **NONE** | 不变 | 仅Git相关文件变更 | 1.0.0.0 → 1.0.0.0 |
 
 ## 🔧 配置要求
 
@@ -80,13 +81,14 @@ git add ap/cli.py
 git commit -m "添加新的学习功能"
 
 # Hook输出示例：
-# 🔍 运行pre-commit hook...
-# 🤖 使用AI分析变更内容...
-# 📊 分析结果：MINOR
-# 🔄 版本更新：1.0.0 -> 1.1.0
-# ✅ setup.py版本号已更新
-# ✅ setup.py已添加到暂存区
-# 🎉 Pre-commit hook执行完成
+```bash
+# [INFO] 运行pre-commit hook...
+# [AI] 使用AI分析变更内容...
+# [ANALYSIS] 分析结果：MINOR
+# [UPDATE] 版本更新：1.0.0 -> 1.1.0
+# [SUCCESS] setup.py版本号已更新
+# [SUCCESS] setup.py已添加到暂存区
+# [COMPLETE] Pre-commit hook执行完成
 ```
 
 ### 跳过Hook（紧急情况）
@@ -145,7 +147,7 @@ git commit -m "测试提交"
    ```
    错误：版本号格式不正确: 1.0
    ```
-   **解决**：确保setup.py中版本号为x.y.z格式
+   **解决**：确保setup.py中版本号为x.y.z.w格式（四位版本号）
 
 ### 调试模式
 
@@ -184,13 +186,13 @@ def increment_version(current_version, update_type):
 Hook执行时会输出详细日志：
 
 ```
-🔍 运行pre-commit hook...           # 开始执行
-🤖 使用AI分析变更内容...            # AI分析阶段
-📊 分析结果：MINOR                  # 分析结果
-🔄 版本更新：1.0.0 -> 1.1.0        # 版本变更
-✅ setup.py版本号已更新             # 文件更新成功
-✅ setup.py已添加到暂存区           # 自动暂存
-🎉 Pre-commit hook执行完成          # 执行完成
+[INFO] 运行pre-commit hook...           # 开始执行
+[AI] 使用AI分析变更内容...            # AI分析阶段
+[ANALYSIS] 分析结果：BUILD                  # 分析结果（新增BUILD类型）
+[UPDATE] 版本更新：1.0.0.0 -> 1.0.0.1    # 版本变更（四位格式）
+[SUCCESS] setup.py版本号已更新             # 文件更新成功
+[SUCCESS] setup.py已添加到暂存区           # 自动暂存
+[COMPLETE] Pre-commit hook执行完成          # 执行完成
 ```
 
 ## 🔒 安全注意事项

@@ -67,7 +67,8 @@ def install_pre_commit_hook():
         print("- 主版本号：重大架构变更、破坏性API变更")
         print("- 次版本号：新增功能、重要功能改进")
         print("- 修订版本号：Bug修复、小的改进")
-        print("- 不更新：仅文档更新、注释修改")
+        print("- 构建号：文档更新、注释修改、格式化")
+        print("- 不更新：仅Git相关文件变更")
         
         return True
         
