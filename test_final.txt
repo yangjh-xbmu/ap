@@ -1,1 +1,0 @@
-这是一个测试文件，用于验证pre-commit hook的Unicode编码修复是否成功。
