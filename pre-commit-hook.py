@@ -40,6 +40,7 @@ def get_staged_changes():
             ["git", "diff", "--cached", "--name-only"],
             capture_output=True,
             text=True,
+            encoding='utf-8',
             check=True
         )
         staged_files = (
@@ -51,13 +52,17 @@ def get_staged_changes():
             ["git", "diff", "--cached"],
             capture_output=True,
             text=True,
+            encoding='utf-8',
             check=True
         )
         staged_diff = result.stdout
 
         return staged_files, staged_diff
     except subprocess.CalledProcessError as e:
-        print(f"获取Git变更失败: {e}")
+        print(f"[ERROR] 获取Git变更失败: {e}")
+        return [], ""
+    except UnicodeDecodeError as e:
+        print(f"[ERROR] Git输出编码错误: {e}")
         return [], ""
 
 
@@ -68,7 +73,8 @@ def get_commit_message():
         result = subprocess.run(
             ["git", "log", "--format=%B", "-n", "1", "HEAD"],
             capture_output=True,
-            text=True
+            text=True,
+            encoding='utf-8'
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -76,6 +82,9 @@ def get_commit_message():
         # 如果没有提交信息，返回空字符串
         return ""
     except subprocess.CalledProcessError:
+        return ""
+    except UnicodeDecodeError as e:
+        print(f"[ERROR] Git提交信息编码错误: {e}")
         return ""
 
 
@@ -242,10 +251,13 @@ def update_setup_py_version(new_version):
 def stage_setup_py():
     """将更新后的setup.py添加到暂存区"""
     try:
-        subprocess.run(["git", "add", "setup.py"], check=True)
+        subprocess.run(["git", "add", "setup.py"], check=True, encoding='utf-8')
         return True
     except subprocess.CalledProcessError as e:
-        print(f"添加setup.py到暂存区失败: {e}")
+        print(f"[ERROR] 添加setup.py到暂存区失败: {e}")
+        return False
+    except UnicodeDecodeError as e:
+        print(f"[ERROR] Git添加文件编码错误: {e}")
         return False
 
 
