@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Pre-commit Hook Script for AP CLI
 使用LLM判断commit内容，自动更新setup.py中的版本号
