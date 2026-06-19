@@ -1,3 +1,13 @@
+---
+purpose: 一个基于AI的命令行学习工具，通过地图-解释-测验-追踪的循环帮助用户掌握新概念。
+status: active
+next_steps: []
+capabilities:
+  - learning-map-generation
+  - progress-visualization
+  - multi-topic-management
+  - pre-commit-hook
+---
 # AP CLI - 智能学习助手
 
 一个基于AI的命令行学习工具，帮助用户通过"地图-解释-测验-追踪"的完整学习循环来掌握新概念。支持多主题管理和智能质量控制。
